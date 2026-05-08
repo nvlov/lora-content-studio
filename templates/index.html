@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280">
+  <title>Lora Content Studio</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand__mark">L</span>
+    <div>
+      <div class="brand__title">Lora Content Studio</div>
+      <div class="brand__sub">Контент для VK-сообщества</div>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button class="tab is-active" data-tab="create">Создать пост</button>
+    <button class="tab" data-tab="library">Библиотека</button>
+    <button class="tab" data-tab="settings">Настройки</button>
+  </nav>
+</header>
+
+<main class="container">
+
+  <!-- ============ CREATE ============ -->
+  <section class="view view--create is-active" data-view="create">
+    <div class="grid grid--editor">
+
+      <aside class="card card--editor">
+        <h2 class="h2">1. Рубрика</h2>
+        <div class="rubrics" id="rubrics-list">
+          <!-- карточки рубрик заполняются JS -->
+        </div>
+
+        <h2 class="h2">2. Тема (необязательно)</h2>
+        <input type="text" id="topic" class="input"
+               placeholder="Например: «procrastinate» или оставь пустым">
+
+        <button id="btn-generate-text" class="btn btn--primary btn--block">
+          Сгенерировать текст
+        </button>
+
+        <h2 class="h2">3. Текст поста</h2>
+        <textarea id="post-text" class="textarea" rows="14"
+                  placeholder="Здесь появится текст…"></textarea>
+        <button id="btn-regenerate-text" class="btn btn--ghost btn--block">
+          Регенерировать
+        </button>
+
+        <h2 class="h2">4. Иллюстрация</h2>
+        <div class="image-actions">
+          <button id="btn-generate-image" class="btn btn--secondary">
+            Сгенерировать через Kling AI
+          </button>
+          <label class="btn btn--ghost">
+            Загрузить вручную
+            <input type="file" id="file-upload" accept="image/png,image/jpeg,image/webp" hidden>
+          </label>
+        </div>
+        <div id="image-status" class="muted small"></div>
+
+        <button id="btn-save" class="btn btn--primary btn--block btn--save">
+          Сохранить как черновик
+        </button>
+      </aside>
+
+      <aside class="card card--preview">
+        <h2 class="h2">Превью «как в ВК»</h2>
+        <div class="vk-post">
+          <div class="vk-post__head">
+            <div class="vk-post__avatar">L</div>
+            <div>
+              <div class="vk-post__author">Лора | Английский с AI-репетитором</div>
+              <div class="vk-post__time muted">только что · <span id="preview-rubric">—</span></div>
+            </div>
+          </div>
+          <div class="vk-post__text" id="preview-text">Текст поста появится здесь…</div>
+          <div class="vk-post__image" id="preview-image">
+            <div class="vk-post__image-placeholder">Картинка появится здесь</div>
+          </div>
+        </div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ============ LIBRARY ============ -->
+  <section class="view view--library" data-view="library">
+    <div class="library-toolbar">
+      <input type="text" id="lib-search" class="input" placeholder="Поиск по тексту и теме…">
+      <select id="lib-rubric" class="input input--select">
+        <option value="">Все рубрики</option>
+      </select>
+      <button id="btn-lib-refresh" class="btn btn--ghost">Обновить</button>
+    </div>
+    <div class="library-grid" id="library-grid">
+      <!-- карточки черновиков -->
+    </div>
+    <div id="library-empty" class="muted center" hidden>
+      Пока нет сохранённых черновиков. Создайте первый!
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section class="view view--settings" data-view="settings">
+    <div class="muted small settings-hint">
+      Подсказка: <code>{topic}</code> в шаблоне картинки заменяется на тему поста.
+    </div>
+    <div id="settings-list" class="settings-list">
+      <!-- карточки рубрик -->
+    </div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
