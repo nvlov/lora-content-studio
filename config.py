@@ -44,7 +44,10 @@ PROXYAPI_ANTHROPIC_URL = "https://api.proxyapi.ru/anthropic/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
 # Kling AI v1 — text2image
-KLING_BASE_URL = "https://api.klingai.com"
+# У Kling два региона с разными базами: api.klingai.com (CN, kling.kuaishou.com)
+# и api-singapore.klingai.com (международный, app.klingai.com/global/dev).
+# По умолчанию — международный, его можно перекрыть через .env (KLING_BASE_URL).
+KLING_BASE_URL = os.getenv("KLING_BASE_URL", "https://api-singapore.klingai.com").strip()
 KLING_T2I_CREATE = "/v1/images/generations"
 
 # === Загрузка файлов ===
