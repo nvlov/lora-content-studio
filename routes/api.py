@@ -38,9 +38,10 @@ def _parse_iso_utc(s: str) -> datetime | None:
         dt = datetime.fromisoformat(raw)
     except ValueError:
         return None
-    # Приводим к UTC naive
+    # vk-launch-001 фикс: правильная конвертация в UTC (раньше ошибочно уходило в локальную TZ)
     if dt.tzinfo is not None:
-        dt = dt.astimezone(tz=None).replace(tzinfo=None)
+        from datetime import timezone as _tz
+        dt = dt.astimezone(_tz.utc).replace(tzinfo=None)
     return dt
 
 

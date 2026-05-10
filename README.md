@@ -56,19 +56,21 @@ copy .env.example .env
 1. Зайди на [dev.vk.com](https://dev.vk.com) → «Создать приложение» → Тип: **Standalone**.
 2. Запиши `App ID` (он понадобится в шаге 2).
 
-### Шаг 2. Получить community access token (токен сообщества)
-Самый простой способ:
-1. Зайди в свою группу (как админ) → **Управление** → **Работа с API** → вкладка **Ключи доступа** → **Создать ключ**.
-2. Включи права: **Сообщения сообщества**, **Фотографии**, **Видеозаписи**, **Стена**, **Истории**.
-3. Скопируй полученный токен.
+### Шаг 2. Получить **user access token** админа группы (через OAuth)
 
-⚠ **Важно:** для публикации от имени сообщества нужен именно **community access token**, а не user token. User token не даст постить от имени группы.
+⚠ **Важно (уточнено по итогам vk-launch-001):** для публикации постов с медиа (фото / видео) нужен **USER access token** админа группы, а не community access token. Community-токен не имеет доступа к `photos.getWallUploadServer` / `video.save` для стены сообщества (VK API code 27). Текстовые посты на community-токене работают, но без картинок и видео.
 
-Альтернативный способ (через OAuth — если по какой-то причине не подходит первый):
-```
-https://oauth.vk.com/authorize?client_id={APP_ID}&display=page&scope=wall,photos,video,stories,offline,manage&response_type=token&v=5.199
-```
-(Подставь свой `APP_ID` вместо `{APP_ID}`. Авторизуйся под админом сообщества.)
+OAuth-flow:
+1. Создай Standalone-приложение на [dev.vk.com](https://dev.vk.com), запиши `App ID`.
+2. Открой в браузере (подставь свой `APP_ID`):
+   ```
+   https://oauth.vk.com/authorize?client_id={APP_ID}&display=page&scope=wall,photos,video,stories,offline,manage&response_type=token&v=5.199&redirect_uri=https://oauth.vk.com/blank.html
+   ```
+3. Авторизуйся **под своим личным аккаунтом** (тот, что является админом группы — НЕ под группой).
+4. После редиректа в адресной строке будет `access_token=vk1.a...` — это и есть user-token. Скопируй.
+5. Хотя переменная в `.env` называется `VK_COMMUNITY_TOKEN` (исторически с v0.2), кладёшь туда **именно user-токен**. Имя переменной оставлено для совместимости.
+
+Постинг происходит **от имени сообщества** благодаря `wall.post(owner_id=-group_id, from_group=1)` — VK сам подставляет автора-сообщество, если автор-человек админ группы.
 
 ### Шаг 3. Узнать `group_id` (числовой)
 Через [regvk.com/id](https://regvk.com/id/) — введи короткое имя (screen-name) сообщества, получи число.
