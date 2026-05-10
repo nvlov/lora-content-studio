@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1280">
-  <title>Lora Content Studio</title>
+  <title>Lora Content Studio v0.2</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -13,13 +13,14 @@
     <span class="brand__mark">L</span>
     <div>
       <div class="brand__title">Lora Content Studio</div>
-      <div class="brand__sub">Контент для VK-сообщества</div>
+      <div class="brand__sub">Контент для VK-сообщества · v0.2</div>
     </div>
   </div>
-  <nav class="tabs">
-    <button class="tab is-active" data-tab="create">Создать пост</button>
-    <button class="tab" data-tab="library">Библиотека</button>
-    <button class="tab" data-tab="settings">Настройки</button>
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-tab="create" role="tab" aria-selected="true">Создать пост</button>
+    <button class="tab" data-tab="library" role="tab" aria-selected="false">Библиотека</button>
+    <button class="tab" data-tab="media" role="tab" aria-selected="false">Медиа</button>
+    <button class="tab" data-tab="settings" role="tab" aria-selected="false">Настройки</button>
   </nav>
 </header>
 
@@ -31,39 +32,81 @@
 
       <aside class="card card--editor">
         <h2 class="h2">1. Рубрика</h2>
-        <div class="rubrics" id="rubrics-list">
-          <!-- карточки рубрик заполняются JS -->
+        <div class="rubrics" id="rubrics-list"></div>
+
+        <div id="topic-block">
+          <h2 class="h2">2. Тема <span class="muted small">(необязательно)</span></h2>
+          <input type="text" id="topic" class="input"
+                 placeholder='Например: «procrastinate» или оставь пустым'>
         </div>
 
-        <h2 class="h2">2. Тема (необязательно)</h2>
-        <input type="text" id="topic" class="input"
-               placeholder="Например: «procrastinate» или оставь пустым">
+        <div id="free-topic-block" hidden>
+          <h2 class="h2">2. Описание задачи</h2>
+          <textarea id="free-topic" class="textarea" rows="4"
+                    placeholder='Опишите задачу: например, "напиши пост-анонс к Дню Святого Валентина с парой романтических идиом"'></textarea>
+        </div>
 
-        <button id="btn-generate-text" class="btn btn--primary btn--block">
-          Сгенерировать текст
+        <button id="btn-generate-text" class="btn btn--primary btn--block" title="Ctrl+Enter">
+          <span class="icon" data-icon="sparkles"></span>
+          <span>Сгенерировать текст</span>
+          <span class="hk">Ctrl+Enter</span>
         </button>
 
         <h2 class="h2">3. Текст поста</h2>
         <textarea id="post-text" class="textarea" rows="14"
                   placeholder="Здесь появится текст…"></textarea>
+        <div class="char-counter" id="char-counter"><span id="char-count">0</span> / 4096</div>
+
         <button id="btn-regenerate-text" class="btn btn--ghost btn--block">
-          Регенерировать
+          <span class="icon" data-icon="refresh"></span>
+          <span>Регенерировать</span>
         </button>
 
-        <h2 class="h2">4. Иллюстрация</h2>
+        <h2 class="h2">4. Медиа поста</h2>
         <div class="image-actions">
           <button id="btn-generate-image" class="btn btn--secondary">
-            Сгенерировать через Kling AI
+            <span class="icon" data-icon="image"></span>
+            <span>Сгенерировать через Kling</span>
           </button>
           <label class="btn btn--ghost">
-            Загрузить вручную
-            <input type="file" id="file-upload" accept="image/png,image/jpeg,image/webp" hidden>
+            <span class="icon" data-icon="upload"></span>
+            <span>Загрузить файл</span>
+            <input type="file" id="file-upload" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" hidden>
           </label>
+          <button id="btn-pick-from-library" class="btn btn--ghost">
+            <span class="icon" data-icon="folder"></span>
+            <span>Из медиа-библиотеки</span>
+          </button>
         </div>
-        <div id="image-status" class="muted small"></div>
+        <div id="image-status" class="muted small status-line"></div>
+        <div id="kling-progress" class="kling-progress" hidden>
+          <span class="spinner"></span>
+          <span class="kling-progress__text">Идёт генерация… <span id="kling-timer">0</span> сек</span>
+          <div class="muted small">Это занимает 1–2 минуты, не закрывай вкладку</div>
+        </div>
 
-        <button id="btn-save" class="btn btn--primary btn--block btn--save">
-          Сохранить как черновик
+        <div class="actions-row">
+          <button id="btn-save" class="btn btn--primary" title="Ctrl+S">
+            <span class="icon" data-icon="save"></span>
+            <span>Сохранить как черновик</span>
+            <span class="hk">Ctrl+S</span>
+          </button>
+          <button id="btn-publish-now" class="btn btn--secondary" title="Ctrl+P" disabled>
+            <span class="icon" data-icon="send"></span>
+            <span>Опубликовать сейчас</span>
+          </button>
+          <button id="btn-schedule" class="btn btn--ghost" disabled>
+            <span class="icon" data-icon="clock"></span>
+            <span>Запланировать</span>
+          </button>
+        </div>
+        <div id="vk-not-configured" class="muted small status-line" hidden>
+          Настрой VK_COMMUNITY_TOKEN и VK_GROUP_ID в .env, чтобы публиковать (см. README).
+        </div>
+        <div id="parent-info" class="muted small status-line" hidden></div>
+        <button id="btn-new" class="btn btn--ghost btn--sm" style="margin-top:1rem">
+          <span class="icon" data-icon="plus"></span>
+          <span>Новый пост</span>
         </button>
       </aside>
 
@@ -78,8 +121,8 @@
             </div>
           </div>
           <div class="vk-post__text" id="preview-text">Текст поста появится здесь…</div>
-          <div class="vk-post__image" id="preview-image">
-            <div class="vk-post__image-placeholder">Картинка появится здесь</div>
+          <div class="vk-post__media" id="preview-media">
+            <div class="vk-post__image-placeholder">Медиа появится здесь</div>
           </div>
         </div>
       </aside>
@@ -94,13 +137,100 @@
       <select id="lib-rubric" class="input input--select">
         <option value="">Все рубрики</option>
       </select>
+      <select id="lib-status" class="input input--select">
+        <option value="">Все статусы</option>
+        <option value="draft">Черновик</option>
+        <option value="scheduled">Запланировано</option>
+        <option value="published">Опубликовано</option>
+        <option value="publish_failed">Ошибка</option>
+      </select>
       <button id="btn-lib-refresh" class="btn btn--ghost">Обновить</button>
     </div>
-    <div class="library-grid" id="library-grid">
-      <!-- карточки черновиков -->
-    </div>
+    <div class="library-grid" id="library-grid"></div>
     <div id="library-empty" class="muted center" hidden>
-      Пока нет сохранённых черновиков. Создайте первый!
+      Пока нет сохранённых черновиков. Создай первый!
+    </div>
+  </section>
+
+  <!-- ============ MEDIA ============ -->
+  <section class="view view--media" data-view="media">
+    <div class="grid grid--media">
+
+      <aside class="card">
+        <h2 class="h2">Генератор промптов для image / video</h2>
+        <p class="muted small">Опиши идею на русском — Claude вернёт 3 варианта детального английского промпта для Kling AI / utopy.ai / MidJourney.</p>
+
+        <label class="label">Идея на русском</label>
+        <textarea id="prompt-idea" class="textarea" rows="3"
+                  placeholder='Например: "Лора объясняет грамматику у доски в уютном классе"'></textarea>
+
+        <div class="form-row">
+          <div>
+            <label class="label">Тип медиа</label>
+            <div class="radio-row">
+              <label class="radio"><input type="radio" name="media-type" value="image" checked> Изображение</label>
+              <label class="radio"><input type="radio" name="media-type" value="video"> Видео</label>
+            </div>
+          </div>
+          <div>
+            <label class="label">Стиль</label>
+            <select id="prompt-style" class="input input--select">
+              <option value="pixar_3d_brand">Pixar-3D (фирменный)</option>
+              <option value="photo_realistic">Photo-realistic</option>
+              <option value="flat_illustration">Flat illustration</option>
+              <option value="watercolor">Акварель</option>
+              <option value="cinematic">Cinematic</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Соотношение сторон</label>
+            <select id="prompt-ratio" class="input input--select">
+              <option value="1:1">1:1 (квадрат)</option>
+              <option value="9:16">9:16 (Stories)</option>
+              <option value="16:9">16:9 (горизонталь)</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="btn-generate-prompts" class="btn btn--primary btn--block">
+          <span class="icon" data-icon="sparkles"></span>
+          <span>Сгенерировать 3 варианта</span>
+        </button>
+        <div id="prompts-status" class="muted small status-line"></div>
+
+        <div id="prompts-result" class="prompts-result"></div>
+
+        <h2 class="h2" style="margin-top:2rem">Сохранённые промпты</h2>
+        <div id="saved-prompts" class="saved-prompts"></div>
+      </aside>
+
+      <aside class="card">
+        <h2 class="h2">Медиа-библиотека</h2>
+        <div id="media-dropzone" class="dropzone">
+          <div class="dropzone__inner">
+            <div class="dropzone__icon"><span class="icon icon--lg" data-icon="upload"></span></div>
+            <div>Перетащи файлы сюда или <label class="link">выбери на диске
+              <input type="file" id="media-file-input" multiple
+                     accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" hidden>
+            </label></div>
+            <div class="muted small">Изображения до 10 МБ (jpg/png/webp), видео до 200 МБ (mp4/webm/mov)</div>
+          </div>
+        </div>
+        <div id="media-upload-status" class="muted small status-line"></div>
+
+        <div class="library-toolbar" style="margin-top:1rem">
+          <select id="media-kind-filter" class="input input--select">
+            <option value="">Все типы</option>
+            <option value="image">Только картинки</option>
+            <option value="video">Только видео</option>
+          </select>
+          <button id="btn-media-refresh" class="btn btn--ghost">Обновить</button>
+        </div>
+        <div id="media-grid" class="media-grid"></div>
+        <div id="media-empty" class="muted center" hidden>
+          В медиа-библиотеке пока пусто.
+        </div>
+      </aside>
     </div>
   </section>
 
@@ -109,14 +239,37 @@
     <div class="muted small settings-hint">
       Подсказка: <code>{topic}</code> в шаблоне картинки заменяется на тему поста.
     </div>
-    <div id="settings-list" class="settings-list">
-      <!-- карточки рубрик -->
-    </div>
+    <div id="settings-list" class="settings-list"></div>
   </section>
 
 </main>
 
-<div id="toast" class="toast" hidden></div>
+<!-- Tост-контейнер -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- Модалка подтверждения -->
+<div id="modal-overlay" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 class="modal__title" id="modal-title">Подтверждение</h3>
+    <div class="modal__message" id="modal-message"></div>
+    <div id="modal-extra" class="modal__extra"></div>
+    <div class="modal__actions">
+      <button class="btn btn--ghost" id="modal-cancel">Отмена</button>
+      <button class="btn btn--primary" id="modal-confirm">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- Модалка picker для медиа -->
+<div id="picker-overlay" class="modal-overlay" hidden>
+  <div class="modal modal--wide" role="dialog" aria-modal="true">
+    <h3 class="modal__title">Выбор медиа из библиотеки</h3>
+    <div id="picker-grid" class="media-grid media-grid--picker"></div>
+    <div class="modal__actions">
+      <button class="btn btn--ghost" id="picker-close">Закрыть</button>
+    </div>
+  </div>
+</div>
 
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
