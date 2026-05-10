@@ -1,9 +1,5 @@
 """Провайдеры изображений: Kling AI (text-to-image) и ручная загрузка файла."""
-import base64
-import hashlib
-import hmac
 import io
-import json
 import logging
 import time
 import uuid
@@ -12,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+import jwt as pyjwt
 from PIL import Image
 
 import config
@@ -37,25 +34,14 @@ class ImageProvider(ABC):
 
 
 # ============================================================
-# JWT helper для Kling (HS256, без сторонних библиотек)
+# JWT helper для Kling (HS256, через библиотеку PyJWT)
 # ============================================================
-
-def _b64url(data: bytes) -> bytes:
-    """URL-safe base64 без паддинга."""
-    return base64.urlsafe_b64encode(data).rstrip(b"=")
-
 
 def _build_kling_jwt(access_key: str, secret_key: str) -> str:
     """Формирует короткоживущий JWT для Kling AI: iss=AK, exp=+30мин, nbf=-5сек."""
-    header = {"alg": "HS256", "typ": "JWT"}
     now = int(time.time())
     payload = {"iss": access_key, "exp": now + 1800, "nbf": now - 5}
-
-    h = _b64url(json.dumps(header, separators=(",", ":"), sort_keys=False).encode())
-    p = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=False).encode())
-    signing_input = h + b"." + p
-    sig = hmac.new(secret_key.encode("utf-8"), signing_input, hashlib.sha256).digest()
-    return (signing_input + b"." + _b64url(sig)).decode("ascii")
+    return pyjwt.encode(payload, secret_key, algorithm="HS256", headers={"typ": "JWT"})
 
 
 # ============================================================
@@ -65,8 +51,8 @@ def _build_kling_jwt(access_key: str, secret_key: str) -> str:
 class KlingImageProvider(ImageProvider):
     """Генерация картинки через Kling AI v1 (text-to-image)."""
 
-    POLL_INTERVAL_SEC = 3.0
-    POLL_TIMEOUT_SEC = 120.0
+    POLL_INTERVAL_SEC = 5.0
+    POLL_TIMEOUT_SEC = 180.0
 
     def __init__(
         self,
@@ -188,10 +174,10 @@ class KlingImageProvider(ImageProvider):
             raise ImageError(f"Не удалось скачать картинку из Kling: {e}") from e
 
         filename = f"{uuid.uuid4().hex}.png"
-        out_path: Path = config.UPLOADS_DIR / filename
+        out_path: Path = config.IMAGES_DIR / filename
         out_path.write_bytes(content)
         # возвращаем относительный путь от static/uploads/
-        return filename
+        return f"images/{filename}"
 
 
 # ============================================================
@@ -239,8 +225,8 @@ class ManualUploadHandler:
             img = img.convert("RGB")
 
         filename = f"{uuid.uuid4().hex}.{out_ext}"
-        out_path: Path = config.UPLOADS_DIR / filename
+        out_path: Path = config.IMAGES_DIR / filename
         save_kwargs = {"quality": 90} if out_ext == "jpg" else {}
         img.save(out_path, **save_kwargs)
         log_ai_call(provider="manual_upload", request_type="image", success=True)
-        return filename
+        return f"images/{filename}"
