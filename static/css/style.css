@@ -355,6 +355,8 @@ code {
   display: flex; align-items: center; justify-content: center;
   z-index: 2000; padding: var(--space-md);
 }
+/* hotfix-001: HTML-атрибут [hidden] должен побеждать display:flex/.modal-overlay/.kling-progress */
+.modal-overlay[hidden], .kling-progress[hidden] { display: none; }
 .modal {
   background: var(--color-surface);
   border-radius: var(--radius-card);
