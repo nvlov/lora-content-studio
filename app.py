@@ -1,11 +1,14 @@
-"""Точка входа Flask: создание приложения, инициализация БД, регистрация роутов."""
+"""Точка входа Flask: создание приложения, инициализация БД, регистрация роутов, запуск scheduler."""
+import atexit
 import logging
+import os
 from logging.handlers import RotatingFileHandler
 
 from flask import Flask
 
 import config
 from core.db import init_db, SessionLocal
+from core.scheduler import init_scheduler, shutdown_scheduler
 from routes.pages import bp as pages_bp
 from routes.api import bp as api_bp
 
@@ -34,7 +37,8 @@ def create_app() -> Flask:
 
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.secret_key = config.FLASK_SECRET_KEY
-    app.config["MAX_CONTENT_LENGTH"] = (config.MAX_UPLOAD_SIZE_MB + 1) * 1024 * 1024
+    # Лимит upload = max(image, video) + запас
+    app.config["MAX_CONTENT_LENGTH"] = (config.MAX_VIDEO_SIZE_MB + 5) * 1024 * 1024
 
     init_db()
 
@@ -44,6 +48,14 @@ def create_app() -> Flask:
     @app.teardown_appcontext
     def _shutdown_session(exception=None):
         SessionLocal.remove()
+
+    # Scheduler — запускаем только в основном процессе (Flask debug-режим форкает)
+    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        try:
+            init_scheduler()
+            atexit.register(shutdown_scheduler)
+        except Exception as e:
+            logging.getLogger(__name__).warning("Не удалось запустить scheduler: %s", e)
 
     return app
 
