@@ -1034,6 +1034,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Hotkeys
   document.addEventListener('keydown', (e) => {
+    // hotfix-001: Esc закрывает picker-overlay (у confirmModal свой обработчик)
+    if (e.key === 'Escape') {
+      const picker = $("#picker-overlay");
+      if (picker && !picker.hidden) { picker.hidden = true; e.preventDefault(); return; }
+    }
     if (e.target.matches('input, textarea, select') && !e.ctrlKey && !e.metaKey) return;
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && state.activeTab === 'create') {
       e.preventDefault(); onGenerateText();
