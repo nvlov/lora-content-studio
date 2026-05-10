@@ -292,18 +292,221 @@ code {
 .settings-card__name { flex: 1; font-weight: 600; color: var(--color-primary); }
 
 /* ================================================================
-   toast
+   toast queue (v0.2)
    ================================================================ */
+.toast-container {
+  position: fixed; right: var(--space-md); bottom: var(--space-md);
+  display: flex; flex-direction: column-reverse; gap: 0.5rem;
+  z-index: 1000; pointer-events: none;
+}
 .toast {
-  position: fixed; bottom: var(--space-lg); left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 0.6rem;
   background: var(--color-primary); color: #fff;
-  padding: 0.8rem 1.4rem;
-  border-radius: var(--radius-button);
+  padding: 0.7rem 1.1rem;
+  border-radius: var(--radius-input);
   box-shadow: var(--shadow-card-hover);
   font-size: 0.9rem;
-  z-index: 1000;
-  max-width: 90vw;
+  max-width: 380px;
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0; transform: translateX(20px);
+  transition: opacity 0.2s, transform 0.2s;
 }
+.toast.is-shown { opacity: 1; transform: translateX(0); }
 .toast--error { background: var(--color-error); }
 .toast--success { background: var(--color-success); }
+.toast--warn { background: #B07523; }
 .toast--info { background: var(--color-primary); }
+.toast .icon { width: 18px; height: 18px; flex-shrink: 0; }
+.toast__msg { flex: 1; word-break: break-word; }
+
+/* ================================================================
+   v0.2 — иконки, иконочные кнопки
+   ================================================================ */
+.icon { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
+.icon svg { width: 100%; height: 100%; display: block; }
+.icon--sm { width: 14px; height: 14px; }
+.icon--lg { width: 32px; height: 32px; }
+
+.btn .icon { margin-right: 0.4rem; }
+.btn .hk { margin-left: 0.6rem; opacity: 0.55; font-size: 0.75rem; padding: 0.1rem 0.4rem;
+  background: rgba(255,255,255,0.18); border-radius: 4px; }
+.btn--ghost .hk { background: rgba(31,58,46,0.08); }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.1rem; height: 2.1rem;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-input);
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.icon-btn:hover { background: var(--color-bg); border-color: var(--color-accent); }
+.icon-btn--danger:hover { color: var(--color-error); border-color: var(--color-error); }
+.icon-btn .icon { margin: 0; }
+
+/* ================================================================
+   v0.2 — модалка
+   ================================================================ */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(31,58,46,0.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000; padding: var(--space-md);
+}
+.modal {
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card-hover);
+  padding: var(--space-md);
+  max-width: 480px; width: 100%;
+  border: 1px solid var(--color-border);
+}
+.modal--wide { max-width: 880px; max-height: 80vh; overflow: auto; }
+.modal__title { font-family: var(--font-heading); color: var(--color-primary); font-size: 1.15rem; margin-bottom: var(--space-xs); }
+.modal__message { color: var(--color-text); margin-bottom: var(--space-sm); line-height: 1.5; }
+.modal__extra { margin-bottom: var(--space-sm); }
+.modal__actions { display: flex; justify-content: flex-end; gap: var(--space-xs); margin-top: var(--space-sm); }
+.btn--danger-solid { background: var(--color-error); color: #fff; }
+.btn--danger-solid:hover:not(:disabled) { background: #9a3724; }
+
+/* ================================================================
+   v0.2 — спиннер
+   ================================================================ */
+.spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 0.4rem;
+}
+.btn--ghost .spinner, .btn--primary .spinner { border-color: rgba(255,255,255,0.4); border-top-color: #fff; }
+.kling-progress .spinner { width: 18px; height: 18px; border-color: rgba(31,58,46,0.2); border-top-color: var(--color-accent); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.kling-progress {
+  display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
+  margin: var(--space-xs) 0;
+  padding: 0.7rem 0.9rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-input);
+}
+.kling-progress__text { color: var(--color-primary); font-weight: 500; }
+
+/* ================================================================
+   v0.2 — счётчик символов
+   ================================================================ */
+.char-counter {
+  text-align: right; color: var(--color-text-muted); font-size: 0.8rem;
+  margin-top: 0.3rem;
+}
+.char-counter.is-warn { color: var(--color-accent); font-weight: 500; }
+.char-counter.is-error { color: var(--color-error); font-weight: 600; }
+.status-line { margin-top: 0.4rem; }
+
+/* ================================================================
+   v0.2 — actions row, badges
+   ================================================================ */
+.actions-row { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-top: var(--space-md); }
+.actions-row .btn { flex: 1 1 auto; min-width: 0; }
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: var(--radius-button);
+  font-weight: 500;
+}
+.badge--draft { background: var(--color-border); color: var(--color-text); }
+.badge--scheduled { background: rgba(200,134,44,0.18); color: var(--color-accent-hover); }
+.badge--published { background: rgba(90,122,58,0.18); color: var(--color-success); }
+.badge--failed { background: rgba(181,67,43,0.18); color: var(--color-error); }
+
+.lib-card__err { color: var(--color-error); font-size: 0.8rem; }
+
+/* ================================================================
+   v0.2 — Media tab
+   ================================================================ */
+.grid--media { grid-template-columns: 1fr 1fr; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-sm); margin: var(--space-sm) 0; }
+.radio-row { display: flex; gap: var(--space-sm); align-items: center; padding: 0.55rem 0; }
+.radio { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+
+.dropzone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 2rem 1rem;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+}
+.dropzone.is-active { border-color: var(--color-accent); background: rgba(200,134,44,0.06); }
+.dropzone__inner { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+.dropzone__icon { color: var(--color-accent); }
+.link { color: var(--color-accent); cursor: pointer; text-decoration: underline; }
+
+.media-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: var(--space-sm); margin-top: var(--space-sm);
+}
+.media-grid--picker { max-height: 60vh; overflow-y: auto; padding-right: 0.5rem; }
+.media-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-input);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.media-card--compact { cursor: pointer; }
+.media-card--compact:hover { border-color: var(--color-accent); }
+.media-card__thumb { width: 100%; aspect-ratio: 1/1; object-fit: cover; background: var(--color-bg); }
+.media-card__thumb--video { display: grid; place-items: center; color: var(--color-accent); font-weight: 600; }
+.media-card__body { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.media-card__name { font-size: 0.8rem; color: var(--color-primary); word-break: break-all; }
+.media-card__meta { font-size: 0.75rem; }
+.media-card__actions { display: flex; gap: 0.3rem; }
+
+.prompts-result { display: flex; flex-direction: column; gap: var(--space-sm); margin-top: var(--space-sm); }
+.saved-prompts { display: flex; flex-direction: column; gap: var(--space-sm); }
+.prompt-card {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-input);
+  padding: var(--space-sm);
+}
+.prompt-card__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.4rem; }
+.prompt-card__text { background: var(--color-surface); padding: 0.6rem; border-radius: 8px;
+  font-family: ui-monospace, monospace; font-size: 0.85rem; line-height: 1.45; word-break: break-word;
+  margin-bottom: 0.5rem; }
+.prompt-card__idea { margin-bottom: 0.4rem; }
+.prompt-card__actions { display: flex; gap: 0.4rem; }
+
+/* ================================================================
+   v0.2 — VK preview (image+video)
+   ================================================================ */
+.vk-post__media {
+  width: 100%; aspect-ratio: 1 / 1;
+  background: #f0f2f5;
+  border-radius: 8px; overflow: hidden;
+  display: grid; place-items: center;
+}
+.vk-post__media img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.vk-post__media video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.vk-post__image-placeholder { color: #6b7480; font-size: 0.9rem; }
+
+.fullscreen-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+  display: grid; place-items: center; z-index: 3000; cursor: zoom-out;
+}
+.fullscreen-overlay img { max-width: 95vw; max-height: 95vh; }
+
+/* ================================================================
+   v0.2 — фокус-стиль для доступности
+   ================================================================ */
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
