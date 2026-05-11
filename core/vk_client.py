@@ -9,6 +9,8 @@
 Документация: https://dev.vk.com/method
 """
 import logging
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -20,8 +22,27 @@ from core.logging_utils import log_ai_call
 log = logging.getLogger(__name__)
 
 
+def _parse_iso_to_utc(s: str) -> Optional[datetime]:
+    """Парсит ISO 8601 строку в timezone-aware UTC datetime."""
+    if not s:
+        return None
+    try:
+        # Поддержка 'Z' и offsets
+        s2 = s.strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s2)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 class VKAPIError(Exception):
     """Понятная ошибка VK API, безопасная для показа пользователю."""
+
+
+class VKAuthExpiredError(VKAPIError):
+    """Refresh-token истёк/инвалидирован — нужна повторная авторизация через get_vk_token.py."""
 
 
 # Часто встречающиеся коды ошибок VK с переводом на человеческий русский.
@@ -30,10 +51,15 @@ _VK_ERROR_HINTS = {
     7: "У токена нет прав на это действие. Нужны права wall, photos, video, manage.",
     9: "Превышен лимит публикаций. Подожди и попробуй снова.",
     14: "VK требует капчу. Попробуй чуть позже.",
-    15: "Доступ запрещён. Проверь, что ты — админ группы и group_id в .env корректный.",
+    15: "Доступ запрещён: токен не имеет нужного scope. В Self Service VK-приложения "
+        "(id.vk.com → твоё приложение → раздел разрешений) включи wall, photos, video, "
+        "groups, offline и пройди OAuth заново через scripts/get_vk_token.py.",
     27: "Метод недоступен с community-токеном. Для постов с медиа нужен USER-токен админа (см. README, OAuth-flow).",
     100: "Один из параметров VK API не принят (обычно неверный group_id или формат).",
     214: "Запись на стене недоступна (нужны права wall в токене).",
+    1051: "Метод недоступен для текущего типа VK-приложения. У VK ID Standalone-приложений "
+          "доступ к video.save/photos.* выдаётся только после расширенной верификации "
+          "в VK Бизнес ID. См. id.vk.com → Self Service → Верификация.",
 }
 
 
@@ -56,13 +82,16 @@ class VKClient:
     HTTP_TIMEOUT = 60.0
     UPLOAD_TIMEOUT = 300.0  # видео могут грузиться долго
 
+    # Один lock на класс — refresh должен быть взаимоисключающим даже между
+    # несколькими экземплярами VKClient в одном процессе (планировщик + API).
+    _refresh_lock = threading.Lock()
+
     def __init__(
         self,
         token: Optional[str] = None,
         group_id: Optional[int] = None,
         api_version: Optional[str] = None,
     ):
-        self.token = (token or config.VK_COMMUNITY_TOKEN).strip()
         gid = group_id if group_id is not None else config.VK_GROUP_ID
         try:
             self.group_id = int(str(gid).strip().lstrip("-"))
@@ -70,8 +99,111 @@ class VKClient:
             self.group_id = 0
         self.api_version = api_version or config.VK_API_VERSION
 
+        # Источник токена: 'oauth_user' (новый VK ID) или 'legacy_community' (старый).
+        self.token_source: Optional[str] = None
+        self.token_expires_at: Optional[datetime] = None
+        self._refresh_token: Optional[str] = None
+        self._app_id: Optional[str] = None
+        self._device_id: Optional[str] = None
+
+        if token is not None:
+            # Явно переданный токен — используем как есть, без auto-refresh.
+            self.token = token.strip()
+        elif config.VK_USER_ACCESS_TOKEN and config.VK_USER_REFRESH_TOKEN:
+            self.token = config.VK_USER_ACCESS_TOKEN
+            self._refresh_token = config.VK_USER_REFRESH_TOKEN
+            self.token_expires_at = _parse_iso_to_utc(config.VK_USER_TOKEN_EXPIRES_AT)
+            self._app_id = config.VK_OAUTH_APP_ID
+            self._device_id = config.VK_OAUTH_DEVICE_ID
+            self.token_source = "oauth_user"
+        elif config.VK_COMMUNITY_TOKEN:
+            self.token = config.VK_COMMUNITY_TOKEN.strip()
+            self.token_source = "legacy_community"
+            log.info(
+                "VK client использует community-токен. Фото и текст работают; "
+                "видео через API недоступно (video.save → code 27 для community)."
+            )
+        else:
+            self.token = ""
+
     def is_configured(self) -> bool:
         return bool(self.token) and self.group_id > 0
+
+    def media_publish_supported(self) -> bool:
+        """True если токен может загружать фото (через любую из рабочих ветвей).
+
+        - oauth_user: фото и видео (стандартный путь photos.getWallUploadServer/video.save)
+        - legacy_community: только фото через photos.getMessagesUploadServer-обход
+        """
+        return self.token_source in ("oauth_user", "legacy_community")
+
+    def video_publish_supported(self) -> bool:
+        """True только для oauth_user — community-токены не могут вызывать video.save."""
+        return self.token_source == "oauth_user"
+
+    # ------------------------------------------------------------
+    # Auto-refresh OAuth-токена
+    # ------------------------------------------------------------
+
+    def _ensure_fresh_token(self) -> None:
+        """Если до истечения < 5 мин — рефрешит access_token через refresh_token.
+
+        Для legacy-токена ничего не делает (старый токен живёт пока живёт).
+        """
+        if self.token_source != "oauth_user":
+            return
+        if not self._refresh_token or not self._app_id or not self._device_id:
+            return
+        if self.token_expires_at is None:
+            return  # без срока — не трогаем
+        now = datetime.now(timezone.utc)
+        if now < self.token_expires_at - timedelta(minutes=5):
+            return  # ещё свежий
+
+        with VKClient._refresh_lock:
+            # Повторная проверка — другой поток мог уже обновить.
+            if self.token_expires_at and now < self.token_expires_at - timedelta(minutes=5):
+                return
+
+            # Импорт внутри функции — чтобы не было циклической зависимости при импорте модуля.
+            from core.vk_oauth import refresh_access_token, VKOAuthError
+
+            try:
+                tokens = refresh_access_token(
+                    refresh_token=self._refresh_token,
+                    app_id=self._app_id,
+                    device_id=self._device_id,
+                )
+            except VKOAuthError as e:
+                msg = (
+                    f"Не удалось обновить VK access_token: {e}. "
+                    "Запусти `python scripts/get_vk_token.py` для повторной авторизации."
+                )
+                log.error(msg)
+                raise VKAuthExpiredError(msg) from e
+
+            self.token = tokens["access_token"]
+            self.token_expires_at = tokens["expires_at"]
+            new_refresh = tokens.get("refresh_token") or ""
+            if new_refresh:
+                self._refresh_token = new_refresh
+
+            # Сохраняем в .env, чтобы пережить рестарт.
+            try:
+                from pathlib import Path as _Path
+                from scripts.get_vk_token import update_env_file
+                env_path = _Path(config.BASE_DIR) / ".env"
+                update_env_file(env_path, {
+                    "VK_USER_ACCESS_TOKEN": self.token,
+                    "VK_USER_REFRESH_TOKEN": self._refresh_token or "",
+                    "VK_USER_TOKEN_EXPIRES_AT": self.token_expires_at.isoformat(),
+                })
+            except Exception as e:
+                # Если запись в .env не удалась — токен в памяти всё равно свежий, продолжаем.
+                log.warning("Не удалось записать обновлённый VK-токен в .env: %s", e)
+
+            log.info("VK access_token автоматически обновлён (expires_at=%s).",
+                     self.token_expires_at.isoformat())
 
     # ------------------------------------------------------------
     # Низкоуровневый вызов API
@@ -79,7 +211,10 @@ class VKClient:
 
     def _api(self, method: str, params: dict, request_type: str) -> dict:
         if not self.is_configured():
-            raise VKAPIError("VK не настроен. Заполни VK_COMMUNITY_TOKEN и VK_GROUP_ID в .env.")
+            raise VKAPIError("VK не настроен. Заполни VK-токен и VK_GROUP_ID в .env.")
+
+        # Авто-рефреш OAuth-токена (для legacy — no-op).
+        self._ensure_fresh_token()
 
         body = dict(params)
         body["access_token"] = self.token
@@ -113,13 +248,19 @@ class VKClient:
     # ------------------------------------------------------------
 
     def upload_photo(self, image_abs_path: str) -> str:
-        """Загружает фото на стену сообщества, возвращает attachment-строку 'photo{owner}_{id}'."""
+        """Загружает фото и возвращает attachment-строку 'photo{owner}_{id}'.
+
+        Использует messages-upload-server (а не getWallUploadServer): этот путь
+        работает с community-токеном, тогда как классический getWallUploadServer
+        VK закрыл для group-auth (code 27). Полученный photo-attachment
+        универсален и корректно прикрепляется к wall.post.
+        """
         path = Path(image_abs_path)
         if not path.exists() or not path.is_file():
             raise VKAPIError(f"Файл не найден: {image_abs_path}")
 
-        # 1) получаем upload_url
-        srv = self._api("photos.getWallUploadServer",
+        # 1) получаем upload_url через messages-upload-server для сообщества
+        srv = self._api("photos.getMessagesUploadServer",
                         {"group_id": self.group_id}, "upload_photo")
         upload_url = srv.get("upload_url")
         if not upload_url:
@@ -143,21 +284,20 @@ class VKClient:
         if not up.get("photo") or up.get("photo") == "[]":
             raise VKAPIError("VK upload фото: пустой ответ (возможно, файл некорректный).")
 
-        # 3) сохраняем фото на стену
-        saved = self._api("photos.saveWallPhoto", {
-            "group_id": self.group_id,
+        # 3) сохраняем фото — saveMessagesPhoto, парный к getMessagesUploadServer
+        saved = self._api("photos.saveMessagesPhoto", {
             "server": up.get("server"),
             "photo": up.get("photo"),
             "hash": up.get("hash"),
         }, "upload_photo")
 
         if not saved or not isinstance(saved, list):
-            raise VKAPIError(f"photos.saveWallPhoto: неожиданный ответ {saved}")
+            raise VKAPIError(f"photos.saveMessagesPhoto: неожиданный ответ {saved}")
         first = saved[0]
         owner = first.get("owner_id")
         pid = first.get("id")
         if owner is None or pid is None:
-            raise VKAPIError(f"photos.saveWallPhoto: нет owner_id/id в ответе ({first})")
+            raise VKAPIError(f"photos.saveMessagesPhoto: нет owner_id/id в ответе ({first})")
 
         log_ai_call(provider="vk", request_type="upload_photo", success=True)
         return f"photo{owner}_{pid}"
@@ -167,7 +307,20 @@ class VKClient:
     # ------------------------------------------------------------
 
     def upload_video(self, video_abs_path: str, name: str = "post video", description: str = "") -> str:
-        """Загружает видео в сообщество, возвращает attachment 'video{owner}_{id}'."""
+        """Загружает видео в сообщество, возвращает attachment 'video{owner}_{id}'.
+
+        ⚠ Для community-токенов VK блокирует video.save с code 27. Бросаем
+        понятную ошибку до похода в VK, чтобы пользователь сразу понял что
+        делать. Когда (и если) у нас появится user-token с media scope —
+        этот early-return можно убрать.
+        """
+        if self.token_source == "legacy_community":
+            raise VKAPIError(
+                "Загрузка видео в группу через VK API заблокирована для "
+                "community-токенов (video.save → code 27). Опубликуй пост с "
+                "текстом, потом добавь видео в VK вручную через «Изменить запись»."
+            )
+
         path = Path(video_abs_path)
         if not path.exists() or not path.is_file():
             raise VKAPIError(f"Файл не найден: {video_abs_path}")

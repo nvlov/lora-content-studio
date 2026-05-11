@@ -20,6 +20,23 @@ VK_GROUP_ID = os.getenv("VK_GROUP_ID", "").strip()
 VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199").strip()
 VK_API_BASE = "https://api.vk.com/method"
 
+# === VK ID OAuth 2.1 (v0.3) ===
+VK_OAUTH_APP_ID = os.getenv("VK_OAUTH_APP_ID", "").strip()
+VK_OAUTH_REDIRECT_URI = os.getenv(
+    "VK_OAUTH_REDIRECT_URI", "https://oauth.vk.com/blank.html"
+).strip()
+VK_OAUTH_DEVICE_ID = os.getenv("VK_OAUTH_DEVICE_ID", "").strip()
+VK_USER_ACCESS_TOKEN = os.getenv("VK_USER_ACCESS_TOKEN", "").strip()
+VK_USER_REFRESH_TOKEN = os.getenv("VK_USER_REFRESH_TOKEN", "").strip()
+VK_USER_TOKEN_EXPIRES_AT = os.getenv("VK_USER_TOKEN_EXPIRES_AT", "").strip()
+
+# Базовые эндпоинты VK ID OAuth 2.1 (id.vk.com и id.vk.ru — синонимы).
+VK_OAUTH_AUTHORIZE_URL = "https://id.vk.com/authorize"
+VK_OAUTH_TOKEN_URL = "https://id.vk.com/oauth2/auth"
+
+# Скоупы по умолчанию для медиа-публикации в группу от имени группы.
+VK_OAUTH_DEFAULT_SCOPE = "wall photos video groups offline"
+
 # === Flask ===
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev-insecure-change-me")
 FLASK_ENV = os.getenv("FLASK_ENV", "development")

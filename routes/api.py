@@ -564,9 +564,17 @@ def media_prompt_delete(prompt_id: int):
 
 @bp.get("/vk/status")
 def vk_status():
-    """Сообщает фронту, настроен ли VK (есть ли токен)."""
+    """Сообщает фронту, настроен ли VK и какой тип токена используется."""
     vk = VKClient()
-    return jsonify({"configured": vk.is_configured(), "group_id": vk.group_id})
+    expires_at = vk.token_expires_at.isoformat() if vk.token_expires_at else None
+    return jsonify({
+        "configured": vk.is_configured(),
+        "group_id": vk.group_id,
+        "token_source": vk.token_source,           # 'oauth_user' | 'legacy_community' | None
+        "token_expires_at": expires_at,
+        "media_publish_supported": vk.media_publish_supported(),
+        "video_publish_supported": vk.video_publish_supported(),
+    })
 
 
 @bp.post("/posts/<int:post_id>/publish-now")
