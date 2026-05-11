@@ -572,8 +572,7 @@ def vk_status():
         "group_id": vk.group_id,
         "token_source": vk.token_source,           # 'oauth_user' | 'legacy_community' | None
         "token_expires_at": expires_at,
-        "media_publish_supported": vk.media_publish_supported(),
-        "video_publish_supported": vk.video_publish_supported(),
+        # С v0.3.0 публикуем только текст; медиа-флаги намеренно убраны.
     })
 
 

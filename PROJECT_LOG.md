@@ -11,10 +11,10 @@
 | 2.1 | 2026-05-10 | v0.2.1 | [Hotfix 001: модалка медиа-библиотеки зависала при загрузке](docs/sessions/2026-05-10-hotfix-001.md) | ✅ Исправлено |
 | 2.2 | 2026-05-10 | v0.2.2 | [VK launch: тест публикации (A/E/F ✅, B/C/D требует user-token)](docs/sessions/2026-05-10-vk-launch.md) | ⚠ Готов с оговоркой |
 | 3 | 2026-05-10 | v0.3.0-rc1 (in progress) | [VK OAuth Phase 1 Discovery](docs/sessions/2026-05-10-vk-oauth-phase1.md) | 🟡 YELLOW, Phase 2 в следующей сессии |
-| 4 | 2026-05-11 | **v0.3.0** | [VK OAuth complete — фото-публикация через community-token workaround](docs/sessions/2026-05-11-vk-oauth-complete.md) | ✅ Принято |
+| 4 | 2026-05-11 | **v0.3.0** | [VK OAuth complete — продуктовый пивот на текст-только](docs/sessions/2026-05-11-vk-oauth-complete.md) | ✅ Принято |
 
 ## Текущая версия
-**v0.3.0** — фото-публикация в VK работает через community-token (`photos.getMessagesUploadServer` workaround); видео — backlog (заблокировано VK на уровне API для community-токенов); OAuth 2.1 инфраструктура реализована и оставлена в коде как «спящая заготовка» на случай смены политики VK по media scopes.
+**v0.3.0** — продуктовый пивот: публикация только **текста**. VK API в 2026 не предоставляет третьим лицам путей публикации медиа в сообщество (политика «extended API access no longer issued» для OAuth + technical block для community-token). Бэкенд-логика загрузки фото/видео удалена из `core/vk_client.py` и `core/scheduler._do_publish`. OAuth 2.1 инфраструктура из Phase 2 (vk-oauth-001) оставлена в коде как «спящая заготовка» на случай смены политики VK. UI/фронтенд не тронуты — strip медиа-функционала из UI отложен как отдельная задача в backlog.
 
 ## Что дальше (план)
 - **v0.3** — контент-план на месяц (календарь), аналитика VK, генерация видео через Kling Video API

@@ -321,10 +321,6 @@ def test_vkclient_legacy_token_no_refresh(monkeypatch):
     from core.vk_client import VKClient
     client = VKClient()
     assert client.token_source == "legacy_community"
-    # Photo upload works via messages-upload-server workaround for community-tokens.
-    assert client.media_publish_supported() is True
-    # Video upload is blocked at VK API level for community-tokens (code 27).
-    assert client.video_publish_supported() is False
     with patch("core.vk_oauth.refresh_access_token") as mock_refresh:
         client._ensure_fresh_token()
     mock_refresh.assert_not_called()

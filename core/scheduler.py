@@ -99,21 +99,17 @@ def publish_scheduled_post(post_id: int) -> None:
 
 
 def _do_publish(session, post: Post) -> None:
-    """Внутренняя логика публикации — общая для 'now' и 'scheduled'."""
+    """Внутренняя логика публикации — общая для 'now' и 'scheduled'.
+
+    С v0.3.0 публикуется только текст. Поля post.media_kind/image_path/video_path
+    остались в модели для backward-compat (старые черновики не ломаются) и для
+    будущей ручной выгрузки файлов, но в wall.post не передаются.
+    """
     vk = VKClient()
     if not vk.is_configured():
         raise VKAPIError("VK не настроен (нет токена/group_id в .env).")
 
-    attachments: list[str] = []
-    if post.media_kind == "image" and post.image_path:
-        abs_path = config.UPLOADS_DIR / post.image_path
-        attachments.append(vk.upload_photo(str(abs_path)))
-    elif post.media_kind == "video" and post.video_path:
-        abs_path = config.UPLOADS_DIR / post.video_path
-        title = (post.topic or post.text_content[:80] or "Пост").strip()[:128]
-        attachments.append(vk.upload_video(str(abs_path), name=title))
-
-    result = vk.post_to_wall(message=post.text_content, attachments=attachments)
+    result = vk.post_to_wall(message=post.text_content)
     post.status = "published"
     post.published_at = datetime.utcnow()
     post.vk_post_id = result["vk_post_id"]
