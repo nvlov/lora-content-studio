@@ -51,10 +51,15 @@ _VK_ERROR_HINTS = {
     7: "У токена нет прав на это действие. Нужны права wall, photos, video, manage.",
     9: "Превышен лимит публикаций. Подожди и попробуй снова.",
     14: "VK требует капчу. Попробуй чуть позже.",
-    15: "Доступ запрещён. Проверь, что ты — админ группы и group_id в .env корректный.",
+    15: "Доступ запрещён: токен не имеет нужного scope. В Self Service VK-приложения "
+        "(id.vk.com → твоё приложение → раздел разрешений) включи wall, photos, video, "
+        "groups, offline и пройди OAuth заново через scripts/get_vk_token.py.",
     27: "Метод недоступен с community-токеном. Для постов с медиа нужен USER-токен админа (см. README, OAuth-flow).",
     100: "Один из параметров VK API не принят (обычно неверный group_id или формат).",
     214: "Запись на стене недоступна (нужны права wall в токене).",
+    1051: "Метод недоступен для текущего типа VK-приложения. У VK ID Standalone-приложений "
+          "доступ к video.save/photos.* выдаётся только после расширенной верификации "
+          "в VK Бизнес ID. См. id.vk.com → Self Service → Верификация.",
 }
 
 
@@ -114,10 +119,9 @@ class VKClient:
         elif config.VK_COMMUNITY_TOKEN:
             self.token = config.VK_COMMUNITY_TOKEN.strip()
             self.token_source = "legacy_community"
-            log.warning(
-                "VK client использует legacy-токен (VK_COMMUNITY_TOKEN). "
-                "Медиа-публикация (фото/видео) упадёт с code 27. "
-                "Запусти scripts/get_vk_token.py чтобы перейти на VK ID OAuth."
+            log.info(
+                "VK client использует community-токен. Фото и текст работают; "
+                "видео через API недоступно (video.save → code 27 для community)."
             )
         else:
             self.token = ""
@@ -126,7 +130,15 @@ class VKClient:
         return bool(self.token) and self.group_id > 0
 
     def media_publish_supported(self) -> bool:
-        """True, если токен поддерживает загрузку медиа (только OAuth user-токен)."""
+        """True если токен может загружать фото (через любую из рабочих ветвей).
+
+        - oauth_user: фото и видео (стандартный путь photos.getWallUploadServer/video.save)
+        - legacy_community: только фото через photos.getMessagesUploadServer-обход
+        """
+        return self.token_source in ("oauth_user", "legacy_community")
+
+    def video_publish_supported(self) -> bool:
+        """True только для oauth_user — community-токены не могут вызывать video.save."""
         return self.token_source == "oauth_user"
 
     # ------------------------------------------------------------
@@ -236,13 +248,19 @@ class VKClient:
     # ------------------------------------------------------------
 
     def upload_photo(self, image_abs_path: str) -> str:
-        """Загружает фото на стену сообщества, возвращает attachment-строку 'photo{owner}_{id}'."""
+        """Загружает фото и возвращает attachment-строку 'photo{owner}_{id}'.
+
+        Использует messages-upload-server (а не getWallUploadServer): этот путь
+        работает с community-токеном, тогда как классический getWallUploadServer
+        VK закрыл для group-auth (code 27). Полученный photo-attachment
+        универсален и корректно прикрепляется к wall.post.
+        """
         path = Path(image_abs_path)
         if not path.exists() or not path.is_file():
             raise VKAPIError(f"Файл не найден: {image_abs_path}")
 
-        # 1) получаем upload_url
-        srv = self._api("photos.getWallUploadServer",
+        # 1) получаем upload_url через messages-upload-server для сообщества
+        srv = self._api("photos.getMessagesUploadServer",
                         {"group_id": self.group_id}, "upload_photo")
         upload_url = srv.get("upload_url")
         if not upload_url:
@@ -266,21 +284,20 @@ class VKClient:
         if not up.get("photo") or up.get("photo") == "[]":
             raise VKAPIError("VK upload фото: пустой ответ (возможно, файл некорректный).")
 
-        # 3) сохраняем фото на стену
-        saved = self._api("photos.saveWallPhoto", {
-            "group_id": self.group_id,
+        # 3) сохраняем фото — saveMessagesPhoto, парный к getMessagesUploadServer
+        saved = self._api("photos.saveMessagesPhoto", {
             "server": up.get("server"),
             "photo": up.get("photo"),
             "hash": up.get("hash"),
         }, "upload_photo")
 
         if not saved or not isinstance(saved, list):
-            raise VKAPIError(f"photos.saveWallPhoto: неожиданный ответ {saved}")
+            raise VKAPIError(f"photos.saveMessagesPhoto: неожиданный ответ {saved}")
         first = saved[0]
         owner = first.get("owner_id")
         pid = first.get("id")
         if owner is None or pid is None:
-            raise VKAPIError(f"photos.saveWallPhoto: нет owner_id/id в ответе ({first})")
+            raise VKAPIError(f"photos.saveMessagesPhoto: нет owner_id/id в ответе ({first})")
 
         log_ai_call(provider="vk", request_type="upload_photo", success=True)
         return f"photo{owner}_{pid}"
@@ -290,7 +307,20 @@ class VKClient:
     # ------------------------------------------------------------
 
     def upload_video(self, video_abs_path: str, name: str = "post video", description: str = "") -> str:
-        """Загружает видео в сообщество, возвращает attachment 'video{owner}_{id}'."""
+        """Загружает видео в сообщество, возвращает attachment 'video{owner}_{id}'.
+
+        ⚠ Для community-токенов VK блокирует video.save с code 27. Бросаем
+        понятную ошибку до похода в VK, чтобы пользователь сразу понял что
+        делать. Когда (и если) у нас появится user-token с media scope —
+        этот early-return можно убрать.
+        """
+        if self.token_source == "legacy_community":
+            raise VKAPIError(
+                "Загрузка видео в группу через VK API заблокирована для "
+                "community-токенов (video.save → code 27). Опубликуй пост с "
+                "текстом, потом добавь видео в VK вручную через «Изменить запись»."
+            )
+
         path = Path(video_abs_path)
         if not path.exists() or not path.is_file():
             raise VKAPIError(f"Файл не найден: {video_abs_path}")

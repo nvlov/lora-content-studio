@@ -573,6 +573,7 @@ def vk_status():
         "token_source": vk.token_source,           # 'oauth_user' | 'legacy_community' | None
         "token_expires_at": expires_at,
         "media_publish_supported": vk.media_publish_supported(),
+        "video_publish_supported": vk.video_publish_supported(),
     })
 
 
