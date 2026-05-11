@@ -9,6 +9,8 @@
 Документация: https://dev.vk.com/method
 """
 import logging
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -20,8 +22,27 @@ from core.logging_utils import log_ai_call
 log = logging.getLogger(__name__)
 
 
+def _parse_iso_to_utc(s: str) -> Optional[datetime]:
+    """Парсит ISO 8601 строку в timezone-aware UTC datetime."""
+    if not s:
+        return None
+    try:
+        # Поддержка 'Z' и offsets
+        s2 = s.strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s2)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 class VKAPIError(Exception):
     """Понятная ошибка VK API, безопасная для показа пользователю."""
+
+
+class VKAuthExpiredError(VKAPIError):
+    """Refresh-token истёк/инвалидирован — нужна повторная авторизация через get_vk_token.py."""
 
 
 # Часто встречающиеся коды ошибок VK с переводом на человеческий русский.
@@ -56,13 +77,16 @@ class VKClient:
     HTTP_TIMEOUT = 60.0
     UPLOAD_TIMEOUT = 300.0  # видео могут грузиться долго
 
+    # Один lock на класс — refresh должен быть взаимоисключающим даже между
+    # несколькими экземплярами VKClient в одном процессе (планировщик + API).
+    _refresh_lock = threading.Lock()
+
     def __init__(
         self,
         token: Optional[str] = None,
         group_id: Optional[int] = None,
         api_version: Optional[str] = None,
     ):
-        self.token = (token or config.VK_COMMUNITY_TOKEN).strip()
         gid = group_id if group_id is not None else config.VK_GROUP_ID
         try:
             self.group_id = int(str(gid).strip().lstrip("-"))
@@ -70,8 +94,104 @@ class VKClient:
             self.group_id = 0
         self.api_version = api_version or config.VK_API_VERSION
 
+        # Источник токена: 'oauth_user' (новый VK ID) или 'legacy_community' (старый).
+        self.token_source: Optional[str] = None
+        self.token_expires_at: Optional[datetime] = None
+        self._refresh_token: Optional[str] = None
+        self._app_id: Optional[str] = None
+        self._device_id: Optional[str] = None
+
+        if token is not None:
+            # Явно переданный токен — используем как есть, без auto-refresh.
+            self.token = token.strip()
+        elif config.VK_USER_ACCESS_TOKEN and config.VK_USER_REFRESH_TOKEN:
+            self.token = config.VK_USER_ACCESS_TOKEN
+            self._refresh_token = config.VK_USER_REFRESH_TOKEN
+            self.token_expires_at = _parse_iso_to_utc(config.VK_USER_TOKEN_EXPIRES_AT)
+            self._app_id = config.VK_OAUTH_APP_ID
+            self._device_id = config.VK_OAUTH_DEVICE_ID
+            self.token_source = "oauth_user"
+        elif config.VK_COMMUNITY_TOKEN:
+            self.token = config.VK_COMMUNITY_TOKEN.strip()
+            self.token_source = "legacy_community"
+            log.warning(
+                "VK client использует legacy-токен (VK_COMMUNITY_TOKEN). "
+                "Медиа-публикация (фото/видео) упадёт с code 27. "
+                "Запусти scripts/get_vk_token.py чтобы перейти на VK ID OAuth."
+            )
+        else:
+            self.token = ""
+
     def is_configured(self) -> bool:
         return bool(self.token) and self.group_id > 0
+
+    def media_publish_supported(self) -> bool:
+        """True, если токен поддерживает загрузку медиа (только OAuth user-токен)."""
+        return self.token_source == "oauth_user"
+
+    # ------------------------------------------------------------
+    # Auto-refresh OAuth-токена
+    # ------------------------------------------------------------
+
+    def _ensure_fresh_token(self) -> None:
+        """Если до истечения < 5 мин — рефрешит access_token через refresh_token.
+
+        Для legacy-токена ничего не делает (старый токен живёт пока живёт).
+        """
+        if self.token_source != "oauth_user":
+            return
+        if not self._refresh_token or not self._app_id or not self._device_id:
+            return
+        if self.token_expires_at is None:
+            return  # без срока — не трогаем
+        now = datetime.now(timezone.utc)
+        if now < self.token_expires_at - timedelta(minutes=5):
+            return  # ещё свежий
+
+        with VKClient._refresh_lock:
+            # Повторная проверка — другой поток мог уже обновить.
+            if self.token_expires_at and now < self.token_expires_at - timedelta(minutes=5):
+                return
+
+            # Импорт внутри функции — чтобы не было циклической зависимости при импорте модуля.
+            from core.vk_oauth import refresh_access_token, VKOAuthError
+
+            try:
+                tokens = refresh_access_token(
+                    refresh_token=self._refresh_token,
+                    app_id=self._app_id,
+                    device_id=self._device_id,
+                )
+            except VKOAuthError as e:
+                msg = (
+                    f"Не удалось обновить VK access_token: {e}. "
+                    "Запусти `python scripts/get_vk_token.py` для повторной авторизации."
+                )
+                log.error(msg)
+                raise VKAuthExpiredError(msg) from e
+
+            self.token = tokens["access_token"]
+            self.token_expires_at = tokens["expires_at"]
+            new_refresh = tokens.get("refresh_token") or ""
+            if new_refresh:
+                self._refresh_token = new_refresh
+
+            # Сохраняем в .env, чтобы пережить рестарт.
+            try:
+                from pathlib import Path as _Path
+                from scripts.get_vk_token import update_env_file
+                env_path = _Path(config.BASE_DIR) / ".env"
+                update_env_file(env_path, {
+                    "VK_USER_ACCESS_TOKEN": self.token,
+                    "VK_USER_REFRESH_TOKEN": self._refresh_token or "",
+                    "VK_USER_TOKEN_EXPIRES_AT": self.token_expires_at.isoformat(),
+                })
+            except Exception as e:
+                # Если запись в .env не удалась — токен в памяти всё равно свежий, продолжаем.
+                log.warning("Не удалось записать обновлённый VK-токен в .env: %s", e)
+
+            log.info("VK access_token автоматически обновлён (expires_at=%s).",
+                     self.token_expires_at.isoformat())
 
     # ------------------------------------------------------------
     # Низкоуровневый вызов API
@@ -79,7 +199,10 @@ class VKClient:
 
     def _api(self, method: str, params: dict, request_type: str) -> dict:
         if not self.is_configured():
-            raise VKAPIError("VK не настроен. Заполни VK_COMMUNITY_TOKEN и VK_GROUP_ID в .env.")
+            raise VKAPIError("VK не настроен. Заполни VK-токен и VK_GROUP_ID в .env.")
+
+        # Авто-рефреш OAuth-токена (для legacy — no-op).
+        self._ensure_fresh_token()
 
         body = dict(params)
         body["access_token"] = self.token
