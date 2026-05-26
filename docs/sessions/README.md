@@ -13,6 +13,8 @@
 | 2026-05-10 | [3 (vk-oauth-phase1)](2026-05-10-vk-oauth-phase1.md) | v0.3.0-rc1 (WIP) | VK ID OAuth 2.1 discovery → 🟡 YELLOW, Phase 2 в следующей сессии |
 | 2026-05-11 | [4 (vk-oauth-complete)](2026-05-11-vk-oauth-complete.md) | v0.3.0 | VK OAuth complete — продуктовый пивот на текст-только |
 | 2026-05-19 | [5 (v0.3.2)](2026-05-19-session-v0.3.2.md) | v0.3.2 | Notion-стиль, Kling-генератор промптов, связь промпт↔результат, оценки 1-5 |
+| 2026-05-20 | [6 (v0.3.3)](2026-05-20-session-v0.3.3.md) | v0.3.3 | Оценки -2..+2, gpt-image-2 с референсом Лоры, фикс setBusy |
+| 2026-05-26 | [7 (v0.4.0)](2026-05-26-session-v0.4.0.md) | v0.4.0 | Структурный рефакторинг — publishers/generators/storage, CLI, Telegram-заглушка |
 
 ## Шаблон новой сессии
 

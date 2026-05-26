@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
-from core.vk_oauth import (  # noqa: E402
+from core.publishers.vk_oauth import (  # noqa: E402
     VKOAuthError,
     build_authorize_url,
     exchange_code_for_tokens,

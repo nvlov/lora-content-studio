@@ -13,9 +13,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 
 import config
-from core.db import SessionLocal, engine
-from core.models import Post
-from core.vk_client import VKClient, VKAPIError
+from core.storage.db import SessionLocal, engine
+from core.storage.models import Post, PostPublication
+from core.publishers import get_publisher, PublishError
+# Backward-compat re-export: routes/api.py исторически ловит VKAPIError.
+from core.publishers.vk import VKAPIError  # noqa: F401
 from core.logging_utils import log_ai_call
 
 log = logging.getLogger(__name__)
@@ -101,20 +103,85 @@ def publish_scheduled_post(post_id: int) -> None:
 def _do_publish(session, post: Post) -> None:
     """Внутренняя логика публикации — общая для 'now' и 'scheduled'.
 
-    С v0.3.0 публикуется только текст. Поля post.media_kind/image_path/video_path
-    остались в модели для backward-compat (старые черновики не ломаются) и для
-    будущей ручной выгрузки файлов, но в wall.post не передаются.
-    """
-    vk = VKClient()
-    if not vk.is_configured():
-        raise VKAPIError("VK не настроен (нет токена/group_id в .env).")
+    v0.4: мультиплатформенно. Итерируется по post.target_platforms через
+    реестр publishers. Каждая попытка пишется в `post_publications` (успех или нет).
 
-    result = vk.post_to_wall(message=post.text_content)
-    post.status = "published"
-    post.published_at = datetime.utcnow()
-    post.vk_post_id = result["vk_post_id"]
-    post.vk_post_url = result["vk_post_url"]
-    post.last_publish_error = None
+    Статус поста:
+    - published — если ХОТЯ БЫ ОДНА платформа отработала успешно;
+    - publish_failed — если все настроенные платформы упали;
+    - publish_failed с пометкой — если ни одна не настроена.
+
+    Legacy: для VK дублируем результат в Post.vk_post_id/vk_post_url для совместимости
+    с существующим UI; при миграции UI на post_publications эти поля можно убрать.
+
+    С v0.3.0 публикуется только текст (см. session 2026-05-11). Поля media_kind/
+    image_path/video_path в модели Post — backward-compat.
+    """
+    platforms = post.get_target_platforms()
+    if not platforms:
+        platforms = ["vk"]
+
+    any_success = False
+    errors: list[str] = []
+    skipped_unconfigured: list[str] = []
+    now_utc = datetime.utcnow()
+
+    for platform in platforms:
+        try:
+            pub = get_publisher(platform)
+        except PublishError as e:
+            errors.append(f"{platform}: {e}")
+            session.add(PostPublication(
+                post_id=post.id, platform=platform, success=False, error_message=str(e),
+            ))
+            continue
+
+        if not pub.is_configured():
+            skipped_unconfigured.append(platform)
+            session.add(PostPublication(
+                post_id=post.id, platform=platform, success=False,
+                error_message="Платформа не сконфигурирована (нет ключей в .env).",
+            ))
+            continue
+
+        try:
+            result = pub.publish_text(post.text_content)
+        except PublishError as e:
+            log.exception("Публикация в %s упала: %s", platform, e)
+            errors.append(f"{platform}: {e}")
+            session.add(PostPublication(
+                post_id=post.id, platform=platform, success=False, error_message=str(e),
+            ))
+            continue
+
+        any_success = True
+        session.add(PostPublication(
+            post_id=post.id,
+            platform=platform,
+            post_id_at_platform=result.get("post_id"),
+            post_url=result.get("post_url"),
+            success=True,
+            published_at=now_utc,
+        ))
+
+        # Legacy VK-поля для существующего UI.
+        if platform == "vk":
+            post.vk_post_id = result.get("post_id")
+            post.vk_post_url = result.get("post_url")
+
+    if any_success:
+        post.status = "published"
+        post.published_at = now_utc
+        # last_publish_error — оставляем error для платформ которые упали, для UI
+        post.last_publish_error = "; ".join(errors) if errors else None
+    elif skipped_unconfigured and not errors:
+        raise PublishError(
+            f"Ни одна из целевых платформ не настроена: {', '.join(skipped_unconfigured)}. "
+            "Заполни ключи в .env."
+        )
+    else:
+        # Все упали — поднимаем исключение, чтобы caller установил publish_failed.
+        raise PublishError("Все публикаторы упали: " + "; ".join(errors))
 
 
 def publish_now(post_id: int) -> dict:
@@ -123,11 +190,11 @@ def publish_now(post_id: int) -> dict:
     try:
         p = s.get(Post, post_id)
         if not p or p.deleted_at is not None:
-            raise VKAPIError("Пост не найден.")
+            raise PublishError("Пост не найден.")
         if not (p.text_content or "").strip():
-            raise VKAPIError("Текст поста пуст.")
+            raise PublishError("Текст поста пуст.")
         if len(p.text_content) > config.VK_TEXT_LIMIT:
-            raise VKAPIError(f"Текст длиннее {config.VK_TEXT_LIMIT} символов — VK не примет.")
+            raise PublishError(f"Текст длиннее {config.VK_TEXT_LIMIT} символов — VK не примет.")
         try:
             _do_publish(s, p)
             s.commit()

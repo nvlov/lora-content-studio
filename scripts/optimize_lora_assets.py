@@ -1,7 +1,7 @@
 """Оптимизация исходных PNG Лоры из Figma (4096×4096 RGBA, ~10МБ)
 в JPG 1024×1024 (~150КБ) для использования в Claude Vision и gpt-image-2 /edits.
 
-Запуск: venv\Scripts\python.exe scripts\optimize_lora_assets.py
+Запуск: venv\\Scripts\\python.exe scripts\\optimize_lora_assets.py
 
 Идемпотентно: пропускает файлы, у которых оптимизированная копия новее исходника.
 Оригиналы НЕ удаляются — нужны для ручной загрузки в Kling Subject Library.
@@ -9,11 +9,16 @@
 import sys
 from pathlib import Path
 
+# Подключаем корень проекта к sys.path чтобы импортировать config.
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parent.parent
-SRC_DIR = ROOT / "core" / "assets"
-DST_DIR = ROOT / "core" / "assets" / "optimized"
+import config
+
+SRC_DIR = config.LORA_ASSETS_DIR
+DST_DIR = config.LORA_OPTIMIZED_DIR
 
 TARGET_SIZE = 1024
 JPG_QUALITY = 90

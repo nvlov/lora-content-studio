@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import vk_oauth
-from core.vk_oauth import (
+from core.publishers import vk_oauth
+from core.publishers.vk_oauth import (
     VKOAuthError,
     build_authorize_url,
     exchange_code_for_tokens,
@@ -266,7 +266,7 @@ def test_vkclient_ensure_fresh_token_refreshes_when_expired(tmp_path, monkeypatc
     monkeypatch.setattr(config, "VK_GROUP_ID", "237689862")
     monkeypatch.setattr(config, "BASE_DIR", tmp_path)
 
-    from core.vk_client import VKClient
+    from core.publishers.vk import VKClient
 
     new_expires = datetime.now(timezone.utc) + timedelta(hours=24)
     fake_tokens = {
@@ -303,7 +303,7 @@ def test_vkclient_ensure_fresh_token_skips_when_fresh(monkeypatch):
     monkeypatch.setattr(config, "VK_OAUTH_DEVICE_ID", "DEV")
     monkeypatch.setattr(config, "VK_GROUP_ID", "237689862")
 
-    from core.vk_client import VKClient
+    from core.publishers.vk import VKClient
     with patch("core.vk_oauth.refresh_access_token") as mock_refresh:
         client = VKClient()
         client._ensure_fresh_token()
@@ -318,7 +318,7 @@ def test_vkclient_legacy_token_no_refresh(monkeypatch):
     monkeypatch.setattr(config, "VK_COMMUNITY_TOKEN", "LEGACY")
     monkeypatch.setattr(config, "VK_GROUP_ID", "237689862")
 
-    from core.vk_client import VKClient
+    from core.publishers.vk import VKClient
     client = VKClient()
     assert client.token_source == "legacy_community"
     with patch("core.vk_oauth.refresh_access_token") as mock_refresh:

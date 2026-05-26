@@ -7,7 +7,7 @@ from logging.handlers import RotatingFileHandler
 from flask import Flask
 
 import config
-from core.db import init_db, SessionLocal
+from core.storage.db import init_db, SessionLocal
 from core.scheduler import init_scheduler, shutdown_scheduler
 from routes.pages import bp as pages_bp
 from routes.api import bp as api_bp

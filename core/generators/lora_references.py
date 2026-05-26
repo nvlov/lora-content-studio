@@ -14,7 +14,7 @@ from typing import Literal, Optional, TypedDict
 
 import config
 
-ASSETS_DIR: Path = config.BASE_DIR / "core" / "assets" / "optimized"
+ASSETS_DIR: Path = config.LORA_OPTIMIZED_DIR
 
 
 # Регистр эмоций — короткие ключи → файлы.

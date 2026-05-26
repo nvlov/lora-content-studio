@@ -12,13 +12,14 @@ from flask import Blueprint, jsonify, request, send_from_directory
 from sqlalchemy import or_
 
 import config
-from core.db import SessionLocal
-from core.models import Post, Rubric, MediaAsset, MediaPrompt
-from core.llm_client import ClaudeClient, LLMError
-from core.image_clients import KlingImageProvider, OpenAIImageProvider, ImageError
-from core.prompt_generator import generate_kling_prompt
-from core.lora_references import get_reference_path, resolve_emotion, list_available_emotions
-from core.vk_client import VKClient, VKAPIError
+from core.storage.db import SessionLocal
+from core.storage.models import Post, Rubric, MediaAsset, MediaPrompt
+from core.generators.llm_client import ClaudeClient, LLMError
+from core.generators.image_clients import KlingImageProvider, OpenAIImageProvider, ImageError
+from core.generators.prompt_generator import generate_kling_prompt
+from core.generators.lora_references import get_reference_path, resolve_emotion, list_available_emotions
+from core.publishers.vk import VKClient, VKAPIError
+from core.publishers import PublishError
 from core.scheduler import schedule_post, cancel_scheduled_post, publish_now
 
 log = logging.getLogger(__name__)
@@ -857,7 +858,7 @@ def publish_post_now(post_id: int):
 
     try:
         result = publish_now(post_id)
-    except VKAPIError as e:
+    except (VKAPIError, PublishError) as e:
         return _err(str(e), 502)
     except Exception as e:
         log.exception("publish_now error")

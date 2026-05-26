@@ -18,8 +18,8 @@ import logging
 import re
 from typing import Literal, Optional
 
-from core.llm_client import ClaudeClient, LLMError
-from core.lora_references import load_reference
+from core.generators.llm_client import ClaudeClient, LLMError
+from core.generators.lora_references import load_reference
 
 log = logging.getLogger(__name__)
 

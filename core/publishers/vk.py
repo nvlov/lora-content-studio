@@ -25,6 +25,7 @@ import httpx
 
 import config
 from core.logging_utils import log_ai_call
+from core.publishers.base import BasePublisher, PublishResult, PublishError
 
 log = logging.getLogger(__name__)
 
@@ -43,8 +44,13 @@ def _parse_iso_to_utc(s: str) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
-class VKAPIError(Exception):
-    """Понятная ошибка VK API, безопасная для показа пользователю."""
+class VKAPIError(PublishError):
+    """Понятная ошибка VK API, безопасная для показа пользователю.
+
+    Наследуется от PublishError — это позволяет общему коду (scheduler, manage.py)
+    ловить любые ошибки публикации через `except PublishError`, а VK-специфичный
+    код может явно ловить VKAPIError если нужно.
+    """
 
 
 class VKAuthExpiredError(VKAPIError):
@@ -148,7 +154,7 @@ class VKClient:
             if self.token_expires_at and now < self.token_expires_at - timedelta(minutes=5):
                 return
 
-            from core.vk_oauth import refresh_access_token, VKOAuthError
+            from core.publishers.vk_oauth import refresh_access_token, VKOAuthError
 
             try:
                 tokens = refresh_access_token(
@@ -247,3 +253,36 @@ class VKClient:
         post_url = f"https://vk.com/wall{owner_id}_{post_id}"
         log_ai_call(provider="vk", request_type="wall_post", success=True)
         return {"vk_post_id": str(post_id), "vk_post_url": post_url}
+
+
+# ----------------------------------------------------------------------------
+# Адаптер к BasePublisher — единый интерфейс для scheduler и CLI.
+# Тонкая обёртка поверх VKClient (низкоуровневый код менять не надо).
+# ----------------------------------------------------------------------------
+
+
+class VKPublisher(BasePublisher):
+    """VK через сообщество. Только текст (v0.3.0 pivot, см. session 2026-05-11)."""
+
+    PLATFORM = "vk"
+    IMPLEMENTED = True
+
+    def __init__(self, client: Optional[VKClient] = None):
+        self._client = client or VKClient()
+
+    def is_configured(self) -> bool:
+        return self._client.is_configured()
+
+    def publish_text(self, message: str) -> PublishResult:
+        try:
+            result = self._client.post_to_wall(message)
+        except VKAPIError as e:
+            raise PublishError(str(e)) from e
+        return PublishResult(
+            platform="vk",
+            post_id=result["vk_post_id"],
+            post_url=result["vk_post_url"],
+        )
+
+    # publish_with_image / publish_with_video — наследуем NotImplementedError.
+    # VK не выдаёт media scope с 2025 года, см. docs/sessions/2026-05-11-vk-oauth-complete.md.

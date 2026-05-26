@@ -1,4 +1,5 @@
 """SQLAlchemy ORM-модели."""
+import json
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey
@@ -38,8 +39,22 @@ class Post(Base):
     deleted_at = Column(DateTime, nullable=True)
     parent_post_id = Column(Integer, ForeignKey("posts.id"), nullable=True)
 
+    # v0.4: список целевых платформ для публикации (JSON-array строк).
+    # Дефолт '["vk"]' сохраняет старое поведение для постов без явного выбора.
+    target_platforms = Column(Text, nullable=False, default='["vk"]')
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def get_target_platforms(self) -> list[str]:
+        """Парсит JSON-список платформ. Падает мягко на дефолт ['vk']."""
+        try:
+            parsed = json.loads(self.target_platforms or '["vk"]')
+            if isinstance(parsed, list) and parsed:
+                return [str(p) for p in parsed]
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return ["vk"]
 
     def to_dict(self) -> dict:
         return {
@@ -58,6 +73,7 @@ class Post(Base):
             "vk_post_id": self.vk_post_id,
             "vk_post_url": self.vk_post_url,
             "last_publish_error": self.last_publish_error,
+            "target_platforms": self.get_target_platforms(),
             "parent_post_id": self.parent_post_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -139,6 +155,40 @@ class MediaAsset(Base):
             "rating": self.rating,
             "feedback_notes": self.feedback_notes,
             "url": f"/static/uploads/{self.file_path}",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class PostPublication(Base):
+    """v0.4: запись об одной публикации поста в одной платформе.
+
+    Один Post может иметь несколько PostPublication (по одной на платформу).
+    Legacy-поля Post.vk_post_id/vk_post_url дублируют запись для VK ради
+    backward-compat с существующим UI — со временем можно мигрировать
+    UI на эту таблицу и убрать legacy.
+    """
+    __tablename__ = "post_publications"
+
+    id = Column(Integer, primary_key=True)
+    post_id = Column(Integer, ForeignKey("posts.id"), nullable=False, index=True)
+    platform = Column(String(32), nullable=False)             # vk | telegram | youtube | tiktok
+    post_id_at_platform = Column(String(64), nullable=True)   # id поста в платформе (если успех)
+    post_url = Column(String(500), nullable=True)             # прямая ссылка (если успех)
+    success = Column(Boolean, nullable=False, default=False)
+    error_message = Column(Text, nullable=True)               # если упал — что сказал API
+    published_at = Column(DateTime, nullable=True)            # UTC, заполняется при успехе
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "post_id": self.post_id,
+            "platform": self.platform,
+            "post_id_at_platform": self.post_id_at_platform,
+            "post_url": self.post_url,
+            "success": self.success,
+            "error_message": self.error_message,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

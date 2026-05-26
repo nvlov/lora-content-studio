@@ -150,21 +150,80 @@ python app.py
 
 При первом запуске автоматически создаётся `data/lora.db` и заполняется четырьмя стартовыми рубриками.
 
-## Структура
+## Структура (v0.4.0)
 
 ```
 lora-content-studio/
-├── app.py              точка входа Flask
-├── config.py           загрузка .env и константы
-├── core/               логика: БД, модели, клиенты Claude и Kling, промпты
-├── routes/             Flask blueprints (страница и API)
-├── templates/          один HTML-шаблон
-├── static/css/         брендовый CSS
-├── static/js/          ванильный JS
-├── static/uploads/     сюда падают сгенерированные/загруженные картинки
-├── data/lora.db        SQLite с черновиками и рубриками
-└── logs/               app.log + ai_calls.jsonl
+├── app.py                    точка входа Flask
+├── manage.py                 CLI (status / list-posts / generate-post / publish / schedule)
+├── config.py                 загрузка .env и константы (пути, лимиты, базовые URL)
+│
+├── core/
+│   ├── scheduler.py          APScheduler + мультиплатформенная публикация
+│   ├── logging_utils.py
+│   ├── publishers/           публикаторы постов (общий интерфейс BasePublisher)
+│   │   ├── base.py           BasePublisher + PublishResult + PublishError
+│   │   ├── vk.py             VKClient + VKPublisher (только текст с v0.3.0)
+│   │   ├── vk_oauth.py       OAuth 2.1 спящая ветка (если VK вернёт media scope)
+│   │   ├── telegram.py       Bot API (заглушка пока канала нет)
+│   │   ├── youtube.py        placeholder (требует Google OAuth + app review)
+│   │   └── tiktok.py         placeholder (требует Content Posting API access)
+│   ├── generators/           генераторы контента
+│   │   ├── llm_client.py     Claude через ProxyAPI
+│   │   ├── prompts.py        рубрики и системные промпты
+│   │   ├── prompt_generator.py   Kling-промпт-генератор
+│   │   ├── image_clients.py  gpt-image-2 через ProxyAPI (/edits с референсом)
+│   │   └── lora_references.py    7 эмоций Лоры
+│   ├── storage/              SQLAlchemy
+│   │   ├── db.py             engine, миграции v0.2 → v0.4
+│   │   └── models.py         Post, Rubric, MediaAsset, MediaPrompt, PostPublication
+│   ├── ingest/               (пусто, под автосбор источников)
+│   └── analytics/            (пусто, под аналитику VK/Telegram)
+│
+├── routes/                   Flask blueprints
+│
+├── assets/lora/              бренд-ассеты Лоры (PNG-оригиналы gitignored, JPG в репо)
+│   └── optimized/            JPG 1024×1024 для Claude Vision и gpt-image-2 /edits
+│
+├── templates/                один HTML-шаблон
+├── static/css/  static/js/   фронтенд
+├── static/uploads/           сгенерированные/загруженные пользователем медиа
+│
+├── data/                     рабочие данные (gitignored)
+│   ├── lora.db               SQLite
+│   ├── inbox/video/          видео из Kling (внешний workflow)
+│   ├── inbox/text/           тексты-источники для автосбора
+│   ├── exports/              отчёты аналитики
+│   └── content_calendar/     контент-план
+│
+├── references/               бренд-материалы (тон голоса, гайдлайны рубрик)
+├── briefs/                   короткие записки для Claude в чате
+├── tasks/active/             текущее ТЗ для Claude Code-агента
+├── tasks/archive/            закрытые ТЗ
+├── tmp/                      эфемерные файлы (gitignored)
+├── tests/                    pytest + fixtures
+│
+├── docs/sessions/            отчёты по рабочим сессиям
+├── docs/research/            research-документы по внешним API
+├── docs/deployment/          заметки по серверной части
+└── logs/                     app.log + ai_calls.jsonl
 ```
+
+## CLI (терминальная работа без UI)
+
+```cmd
+venv\Scripts\python manage.py status
+venv\Scripts\python manage.py list-posts --status draft
+venv\Scripts\python manage.py show-post 42
+venv\Scripts\python manage.py generate-post word_of_day
+venv\Scripts\python manage.py generate-post free_topic --topic "идиома piece of cake"
+venv\Scripts\python manage.py publish 42                  # default: vk
+venv\Scripts\python manage.py publish 42 --platform telegram
+venv\Scripts\python manage.py publish 42 --platform all   # все настроенные
+venv\Scripts\python manage.py schedule 42 2026-05-27T10:00:00
+```
+
+Все команды работают параллельно с Flask UI — общая БД, общие модули, разные интерфейсы.
 
 ## Что в этой версии (v0.2)
 
@@ -184,7 +243,20 @@ lora-content-studio/
 - Редактирование промптов рубрик
 - Логирование AI-вызовов в `logs/ai_calls.jsonl` (теперь и VK API)
 
-## Что планируется
+## Что в v0.4.0 (2026-05-26)
 
-- **v0.3** — контент-план на месяц с календарной сеткой, аналитика VK (охваты/лайки/комментарии), генерация коротких видео через Kling Video API
-- **v0.4** — деплой на VPS, Docker, GitHub Actions, миграция SQLite → PostgreSQL
+Структурный рефакторинг под расширение SMM:
+- Декомпозиция `core/` на подпакеты `publishers/`, `generators/`, `storage/`, `ingest/`, `analytics/`. Базовый интерфейс `BasePublisher`.
+- **Telegram** через Bot API — модуль готов, активируется по добавлению `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHANNEL_ID` в `.env`.
+- **YouTube / TikTok** — placeholder-модули с docstrings, описывающими план подключения (OAuth, app review).
+- **CLI** `manage.py` — терминальный интерфейс для генерации и публикации.
+- **Мультиплатформенная публикация** — `Post.target_platforms` (JSON-список) + таблица `post_publications` для истории по каждой платформе.
+- Бренд-ассеты Лоры вынесены из кодовой папки в `assets/lora/`.
+
+## Roadmap (после v0.4.0)
+
+- **Контент-план** на месяц с календарной сеткой
+- **Аналитика VK / Telegram** — охваты, лайки, комментарии (модуль `core/analytics/`)
+- **Автосбор источников** — RSS-фиды, Reddit, англоязычные блоги (модуль `core/ingest/`)
+- **Structured output** от Claude (JSON-schema) для надёжной интеграции с автопостингом
+- **VPS deploy** — Docker, GitHub Actions, миграция SQLite → PostgreSQL

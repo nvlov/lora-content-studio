@@ -8,8 +8,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, scoped_session
 
 import config
-from core.models import Base, Rubric, Post
-from core.prompts import STARTER_RUBRICS, NEW_RUBRICS_V0_2
+from core.storage.models import Base, Rubric, Post
+from core.generators.prompts import STARTER_RUBRICS, NEW_RUBRICS_V0_2
 
 log = logging.getLogger(__name__)
 
@@ -128,6 +128,29 @@ def migrate_to_v0_3_2() -> None:
                 log.info("v0.3.2 миграция media_prompts: добавлены колонки %s", added_mp)
 
 
+_POST_COLUMNS_V0_4 = [
+    ("target_platforms", "TEXT NOT NULL DEFAULT '[\"vk\"]'"),
+]
+
+
+def migrate_to_v0_4() -> None:
+    """ALTER TABLE для v0.4: Post.target_platforms. Идемпотентно."""
+    with engine.begin() as conn:
+        present = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='posts'")
+        ).first()
+        if not present:
+            return
+        existing = _existing_columns(conn, "posts")
+        added = []
+        for col_name, col_def in _POST_COLUMNS_V0_4:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE posts ADD COLUMN {col_name} {col_def}"))
+                added.append(col_name)
+        if added:
+            log.info("v0.4 миграция БД: добавлены колонки %s", added)
+
+
 def migrate_rating_scale_to_signed() -> None:
     """Переводит rating с шкалы 1..5 на -2..+2 сдвигом на -3. Идемпотентно:
     запускается только если в данных есть значения > 2 (признак старой шкалы)."""
@@ -225,6 +248,7 @@ def init_db() -> None:
     # 1) ALTER старых таблиц — ДО create_all, чтобы create_all не пытался переопределять
     migrate_to_v0_2()
     migrate_to_v0_3_2()
+    migrate_to_v0_4()
     migrate_rating_scale_to_signed()
 
     # 2) Создание новых таблиц (media_assets, media_prompts) и недостающих

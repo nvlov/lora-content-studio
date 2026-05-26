@@ -10,7 +10,12 @@ static/uploads/*
 .vscode/
 .idea/
 *.db
+.pytest_cache/
+
+# Эфемерные файлы текущей сессии — не в репо.
+# Папка создаётся config.py при старте, чтобы не падать на чистом клоне.
+tmp/
 
 # Локальные бренд-оригиналы Лоры (4K PNG, ~75 МБ) — не в репо.
-# Оптимизированные JPG (core/assets/optimized/*) остаются в репо.
-core/assets/*.png
+# Оптимизированные JPG (assets/lora/optimized/*) остаются в репо.
+assets/lora/*.png
