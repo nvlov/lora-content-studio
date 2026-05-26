@@ -115,6 +115,10 @@ class MediaAsset(Base):
     duration_seconds = Column(Float, nullable=True)
     source = Column(String(32), nullable=False, default="manual_upload")  # manual_upload | kling | external_ai
     prompt_used = Column(Text, nullable=True)
+    # v0.3.2: связь с промптом + оценка
+    source_prompt_id = Column(Integer, ForeignKey("media_prompts.id"), nullable=True)
+    rating = Column(Integer, nullable=True)                # -2..+2, NULL = не оценено
+    feedback_notes = Column(Text, nullable=True)
     deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -131,13 +135,16 @@ class MediaAsset(Base):
             "duration_seconds": self.duration_seconds,
             "source": self.source,
             "prompt_used": self.prompt_used,
+            "source_prompt_id": self.source_prompt_id,
+            "rating": self.rating,
+            "feedback_notes": self.feedback_notes,
             "url": f"/static/uploads/{self.file_path}",
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
 class MediaPrompt(Base):
-    """Сохранённый промпт для повторного использования при генерации картинок/видео внешними AI."""
+    """Сохранённый промпт для генерации картинок/видео через Kling (внешний workflow)."""
     __tablename__ = "media_prompts"
 
     id = Column(Integer, primary_key=True)
@@ -146,6 +153,14 @@ class MediaPrompt(Base):
     media_type = Column(String(16), nullable=False)        # image | video
     style = Column(String(64), nullable=False, default="pixar_3d_brand")
     aspect_ratio = Column(String(16), nullable=False, default="1:1")
+    # v0.3.2 — Kling-специфичные поля
+    negative_prompt_en = Column(Text, nullable=True)
+    duration = Column(Integer, nullable=True)              # 5 или 10, только для video
+    camera_movement = Column(String(32), nullable=True)
+    video_mode = Column(String(16), nullable=True)         # silent | audio_en, только для video
+    dialog_en = Column(Text, nullable=True)                # для audio_en
+    voice_tone = Column(String(64), nullable=True)         # для audio_en
+    # legacy v0.2 — оставлен для backward-compat
     best_for = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -154,9 +169,15 @@ class MediaPrompt(Base):
             "id": self.id,
             "idea_ru": self.idea_ru,
             "prompt_en": self.prompt_en,
+            "negative_prompt_en": self.negative_prompt_en,
             "media_type": self.media_type,
             "style": self.style,
             "aspect_ratio": self.aspect_ratio,
+            "duration": self.duration,
+            "camera_movement": self.camera_movement,
+            "video_mode": self.video_mode,
+            "dialog_en": self.dialog_en,
+            "voice_tone": self.voice_tone,
             "best_for": self.best_for,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

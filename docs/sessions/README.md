@@ -11,6 +11,8 @@
 | 2026-05-10 | [hotfix-001](2026-05-10-hotfix-001.md) | v0.2.1 | Фикс: модалка picker зависала при загрузке (CSS [hidden] vs display:flex) |
 | 2026-05-10 | [vk-launch-001](2026-05-10-vk-launch.md) | v0.2.2 | Интеграционный VK тест: текст и расписание ОК; медиа требует user-token |
 | 2026-05-10 | [3 (vk-oauth-phase1)](2026-05-10-vk-oauth-phase1.md) | v0.3.0-rc1 (WIP) | VK ID OAuth 2.1 discovery → 🟡 YELLOW, Phase 2 в следующей сессии |
+| 2026-05-11 | [4 (vk-oauth-complete)](2026-05-11-vk-oauth-complete.md) | v0.3.0 | VK OAuth complete — продуктовый пивот на текст-только |
+| 2026-05-19 | [5 (v0.3.2)](2026-05-19-session-v0.3.2.md) | v0.3.2 | Notion-стиль, Kling-генератор промптов, связь промпт↔результат, оценки 1-5 |
 
 ## Шаблон новой сессии
 

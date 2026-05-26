@@ -1,19 +1,23 @@
-"""JSON API: рубрики, генерация текста/картинки, CRUD постов, медиа-студия, публикация в VK."""
+"""JSON API: рубрики, генерация текста, CRUD постов (только текст с v0.3.1),
+медиа-лаборатория (отдельный workflow для генерации промптов и сохранения файлов),
+публикация в VK."""
 import logging
 import mimetypes
+import re
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_from_directory
 from sqlalchemy import or_
 
 import config
 from core.db import SessionLocal
 from core.models import Post, Rubric, MediaAsset, MediaPrompt
 from core.llm_client import ClaudeClient, LLMError
-from core.image_clients import KlingImageProvider, ManualUploadHandler, ImageError
-from core.prompt_generator import generate_media_prompts
+from core.image_clients import KlingImageProvider, OpenAIImageProvider, ImageError
+from core.prompt_generator import generate_kling_prompt
+from core.lora_references import get_reference_path, resolve_emotion, list_available_emotions
 from core.vk_client import VKClient, VKAPIError
 from core.scheduler import schedule_post, cancel_scheduled_post, publish_now
 
@@ -27,6 +31,19 @@ bp = Blueprint("api", __name__, url_prefix="/api")
 
 def _err(message: str, status: int = 400):
     return jsonify({"error": message}), status
+
+
+# VK не рендерит markdown — `**bold**` и `__italic__` показываются сырьём со
+# звёздочками и подчёркиваниями. Снимаем парные маркеры из текста поста,
+# оставляя содержимое. Одиночные `*` и `_` не трогаем (URL, идиомы).
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_MD_UNDERLINE = re.compile(r"__(.+?)__", re.DOTALL)
+
+
+def _strip_vk_unfriendly_markdown(text: str) -> str:
+    text = _MD_BOLD.sub(r"\1", text)
+    text = _MD_UNDERLINE.sub(r"\1", text)
+    return text
 
 
 def _parse_iso_utc(s: str) -> datetime | None:
@@ -107,7 +124,7 @@ def generate_text():
     except LLMError as e:
         return _err(str(e), 502)
 
-    return jsonify({"text": result["text"]})
+    return jsonify({"text": _strip_vk_unfriendly_markdown(result["text"])})
 
 
 # ============================================================
@@ -137,37 +154,8 @@ def generate_image():
 
 
 # ============================================================
-# manual image upload (legacy, для обратной совместимости)
+# posts CRUD (только текст с v0.3.1; медиа из формы поста удалены)
 # ============================================================
-
-@bp.post("/upload-image")
-def upload_image():
-    file = request.files.get("file")
-    try:
-        filename = ManualUploadHandler().save(file)
-    except ImageError as e:
-        return _err(str(e), 400)
-
-    return jsonify({
-        "image_path": filename,
-        "image_url": f"/static/uploads/{filename}",
-        "image_source": "manual_upload",
-    })
-
-
-# ============================================================
-# posts CRUD
-# ============================================================
-
-def _set_media_kind(post: Post) -> None:
-    """Авто-проставление media_kind по наличию video_path/image_path."""
-    if post.video_path:
-        post.media_kind = "video"
-    elif post.image_path:
-        post.media_kind = "image"
-    else:
-        post.media_kind = "none"
-
 
 @bp.post("/posts")
 def create_post():
@@ -185,13 +173,8 @@ def create_post():
             rubric_key=rubric_key,
             topic=(data.get("topic") or None),
             text_content=text_content,
-            image_path=(data.get("image_path") or None),
-            image_prompt=(data.get("image_prompt") or None),
-            image_source=(data.get("image_source") or "none"),
-            video_path=(data.get("video_path") or None),
             status="draft",
         )
-        _set_media_kind(post)
         s.add(post)
         s.commit()
         s.refresh(post)
@@ -243,14 +226,9 @@ def update_post(post_id: int):
         p = s.get(Post, post_id)
         if not p or p.deleted_at is not None:
             return _err("Пост не найден.", 404)
-        for field in (
-            "rubric_key", "topic", "text_content",
-            "image_path", "image_prompt", "image_source",
-            "video_path", "status",
-        ):
+        for field in ("rubric_key", "topic", "text_content", "status"):
             if field in data:
                 setattr(p, field, data[field])
-        _set_media_kind(p)
         p.updated_at = datetime.utcnow()
         s.commit()
         s.refresh(p)
@@ -305,11 +283,6 @@ def duplicate_post(post_id: int):
             rubric_key=src.rubric_key,
             topic=src.topic,
             text_content=src.text_content,
-            image_path=src.image_path,
-            image_prompt=src.image_prompt,
-            image_source=src.image_source,
-            video_path=src.video_path,
-            media_kind=src.media_kind,
             status="draft",
             parent_post_id=src.id,
         )
@@ -370,7 +343,10 @@ def _is_video_ext(ext: str) -> bool:
 
 @bp.post("/media/upload")
 def media_upload():
-    """Загрузка файла (image или video) в медиа-библиотеку."""
+    """Загрузка файла (image или video) в медиа-библиотеку.
+
+    Опционально привязывает к промпту через `source_prompt_id` (multipart field).
+    """
     f = request.files.get("file")
     if f is None or not getattr(f, "filename", ""):
         return _err("Файл не выбран.")
@@ -416,8 +392,24 @@ def media_upload():
         except Exception:
             pass
 
+    # Опциональная привязка к промпту (multipart-форма)
+    source_prompt_id = None
+    raw_prompt_id = request.form.get("source_prompt_id")
+    if raw_prompt_id:
+        try:
+            source_prompt_id = int(raw_prompt_id)
+        except ValueError:
+            source_prompt_id = None
+
     s = SessionLocal()
     try:
+        # Валидируем что промпт существует и тип совпадает
+        if source_prompt_id is not None:
+            p = s.get(MediaPrompt, source_prompt_id)
+            expected_kind = "image" if is_image else "video"
+            if p is None or p.media_type != expected_kind:
+                source_prompt_id = None
+
         asset = MediaAsset(
             kind="image" if is_image else "video",
             file_path=rel_path,
@@ -426,6 +418,7 @@ def media_upload():
             size_bytes=size,
             width=width, height=height,
             source="manual_upload",
+            source_prompt_id=source_prompt_id,
         )
         s.add(asset)
         s.commit()
@@ -462,7 +455,85 @@ def media_get(asset_id: int):
         a = s.get(MediaAsset, asset_id)
         if not a or a.deleted_at is not None:
             return _err("Файл не найден.", 404)
+        result = a.to_dict()
+        # Прикрепляем сам промпт, если есть связь — фронту удобно показать «по какому промпту»
+        if a.source_prompt_id:
+            p = s.get(MediaPrompt, a.source_prompt_id)
+            if p is not None:
+                result["source_prompt"] = p.to_dict()
+        return jsonify(result)
+    finally:
+        s.close()
+
+
+@bp.patch("/media/<int:asset_id>")
+def media_update(asset_id: int):
+    """Обновляет оценку и связь с промптом. Принимает rating (-2..+2), feedback_notes, source_prompt_id."""
+    data = request.get_json(silent=True) or {}
+    s = SessionLocal()
+    try:
+        a = s.get(MediaAsset, asset_id)
+        if not a or a.deleted_at is not None:
+            return _err("Файл не найден.", 404)
+
+        if "rating" in data:
+            raw = data["rating"]
+            if raw is None or raw == "":
+                a.rating = None
+            else:
+                try:
+                    r = int(raw)
+                except (TypeError, ValueError):
+                    return _err("rating должен быть числом -2..+2.")
+                if not -2 <= r <= 2:
+                    return _err("rating должен быть в диапазоне -2..+2.")
+                a.rating = r
+
+        if "feedback_notes" in data:
+            notes = (data.get("feedback_notes") or "").strip()
+            a.feedback_notes = notes or None
+
+        if "source_prompt_id" in data:
+            raw = data["source_prompt_id"]
+            if raw in (None, "", 0):
+                a.source_prompt_id = None
+            else:
+                try:
+                    pid = int(raw)
+                except (TypeError, ValueError):
+                    return _err("source_prompt_id должен быть числом.")
+                p = s.get(MediaPrompt, pid)
+                if p is None or p.media_type != a.kind:
+                    return _err("Промпт не найден или его media_type не совпадает с файлом.", 404)
+                a.source_prompt_id = pid
+
+        s.commit()
+        s.refresh(a)
         return jsonify(a.to_dict())
+    finally:
+        s.close()
+
+
+@bp.get("/media/<int:asset_id>/download")
+def media_download(asset_id: int):
+    """Отдаёт файл с правильным Content-Disposition и оригинальным именем."""
+    s = SessionLocal()
+    try:
+        a = s.get(MediaAsset, asset_id)
+        if not a or a.deleted_at is not None:
+            return _err("Файл не найден.", 404)
+        # file_path вида 'images/xxx.jpg' или 'videos/xxx.mp4'
+        subdir, _, filename = a.file_path.partition("/")
+        if subdir == "images":
+            directory = config.IMAGES_DIR
+        elif subdir == "videos":
+            directory = config.VIDEOS_DIR
+        else:
+            return _err("Некорректный путь файла.", 500)
+        download_name = a.original_name or filename
+        return send_from_directory(
+            directory, filename, as_attachment=True, download_name=download_name
+        )
     finally:
         s.close()
 
@@ -482,56 +553,132 @@ def media_delete(asset_id: int):
 
 
 # ============================================================
-# Media: generated prompts
+# Media: Kling prompts (v0.3.2 — один промпт под Kling)
 # ============================================================
 
-@bp.post("/media/generate-prompts")
-def media_generate_prompts():
+_ALLOWED_ASPECTS_IMAGE = {"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"}
+_ALLOWED_ASPECTS_VIDEO = {"1:1", "16:9", "9:16"}
+_ALLOWED_DURATIONS = {5, 10}
+_ALLOWED_STYLES = {"pixar_3d_brand", "photo_realistic", "flat_illustration", "watercolor", "cinematic"}
+_ALLOWED_CAMERA = {"static", "pan_left", "pan_right", "dolly_in", "dolly_out",
+                   "tilt_up", "tracking", "rotate_360"}
+_ALLOWED_VIDEO_MODES = {"silent", "audio_en"}
+_ALLOWED_PROMPT_TARGETS = {"kling", "gpt_image_2"}
+
+
+@bp.post("/media/generate-kling-prompt")
+def media_generate_kling_prompt():
+    """Один промпт под Kling или gpt-image-2. Возвращает {prompt, negative_prompt,
+    kling_hint, prompt_id}. Также сохраняет MediaPrompt в БД и возвращает его id для
+    последующей привязки к файлу-результату.
+
+    Параметр `target` (опционально):
+    - 'kling' (по умолчанию) — Kling-структура (image / video / video+audio_en)
+    - 'gpt_image_2' — natural-language промпт под OpenAI gpt-image-2 (только image)
+    """
     data = request.get_json(silent=True) or {}
-    idea = (data.get("idea") or "").strip()
+    idea = (data.get("idea_ru") or "").strip()
     media_type = (data.get("media_type") or "image").strip()
     style = (data.get("style") or "pixar_3d_brand").strip()
     aspect_ratio = (data.get("aspect_ratio") or "1:1").strip()
+    user_negative_ru = (data.get("user_negative_ru") or "").strip()
+    target = (data.get("target") or "kling").strip()
+    rubric_key = (data.get("rubric_key") or "").strip() or None
+    emotion = (data.get("emotion") or "").strip() or None
+    use_reference = bool(data.get("use_reference", True))
 
     if not idea:
-        return _err("Опишите идею для промпта.")
+        return _err("Опиши идею.")
     if media_type not in ("image", "video"):
         return _err("media_type должен быть 'image' или 'video'.")
+    if style not in _ALLOWED_STYLES:
+        return _err(f"Неподдерживаемый стиль: {style}.")
+    if target not in _ALLOWED_PROMPT_TARGETS:
+        return _err(f"target должен быть одним из {_ALLOWED_PROMPT_TARGETS}.")
+    if target == "gpt_image_2" and media_type != "image":
+        return _err("target='gpt_image_2' поддерживается только для image.")
+
+    duration = None
+    camera_movement = None
+    video_mode = "silent"
+    dialog_en = ""
+    voice_tone = ""
+
+    if media_type == "video":
+        if aspect_ratio not in _ALLOWED_ASPECTS_VIDEO:
+            return _err(f"Для видео aspect_ratio допустимо: {', '.join(sorted(_ALLOWED_ASPECTS_VIDEO))}.")
+        try:
+            duration = int(data.get("duration") or 5)
+        except (TypeError, ValueError):
+            return _err("duration должен быть числом.")
+        if duration not in _ALLOWED_DURATIONS:
+            return _err("Длительность видео: 5 или 10 секунд.")
+        camera_movement = (data.get("camera_movement") or "static").strip()
+        if camera_movement not in _ALLOWED_CAMERA:
+            return _err(f"Неподдерживаемое движение камеры: {camera_movement}.")
+        video_mode = (data.get("video_mode") or "silent").strip()
+        if video_mode not in _ALLOWED_VIDEO_MODES:
+            return _err(f"Режим видео: silent или audio_en.")
+        if video_mode == "audio_en":
+            dialog_en = (data.get("dialog_en") or "").strip()
+            voice_tone = (data.get("voice_tone") or "warm friendly").strip()
+            if not dialog_en:
+                return _err("Для режима «с речью» нужна английская реплика.")
+    else:
+        if aspect_ratio not in _ALLOWED_ASPECTS_IMAGE:
+            return _err(f"Для image aspect_ratio допустимо: {', '.join(sorted(_ALLOWED_ASPECTS_IMAGE))}.")
 
     try:
-        variants = generate_media_prompts(
-            idea_ru=idea, media_type=media_type, style=style, aspect_ratio=aspect_ratio
+        result = generate_kling_prompt(
+            idea_ru=idea,
+            media_type=media_type,
+            style=style,
+            aspect_ratio=aspect_ratio,
+            duration=duration,
+            camera_movement=camera_movement,
+            video_mode=video_mode,
+            dialog_en=dialog_en,
+            voice_tone=voice_tone,
+            user_negative_ru=user_negative_ru,
+            target=target,
+            rubric_key=rubric_key,
+            emotion=emotion,
+            use_reference=use_reference,
         )
     except LLMError as e:
         return _err(str(e), 502)
 
-    return jsonify({
-        "variants": variants,
-        "input": {"idea": idea, "media_type": media_type, "style": style, "aspect_ratio": aspect_ratio},
-    })
-
-
-@bp.post("/media/prompts")
-def media_prompt_save():
-    data = request.get_json(silent=True) or {}
+    # Сохраняем промпт в БД
     s = SessionLocal()
     try:
         p = MediaPrompt(
-            idea_ru=(data.get("idea_ru") or "").strip(),
-            prompt_en=(data.get("prompt_en") or "").strip(),
-            media_type=(data.get("media_type") or "image").strip(),
-            style=(data.get("style") or "pixar_3d_brand").strip(),
-            aspect_ratio=(data.get("aspect_ratio") or "1:1").strip(),
-            best_for=(data.get("best_for") or None),
+            idea_ru=idea,
+            prompt_en=result["prompt"],
+            negative_prompt_en=result["negative_prompt"] or None,
+            media_type=media_type,
+            style=style,
+            aspect_ratio=aspect_ratio,
+            duration=duration,
+            camera_movement=camera_movement,
+            video_mode=video_mode if media_type == "video" else None,
+            dialog_en=dialog_en or None,
+            voice_tone=voice_tone or None,
         )
-        if not p.prompt_en:
-            return _err("Пустой prompt_en — нечего сохранять.")
         s.add(p)
         s.commit()
         s.refresh(p)
-        return jsonify(p.to_dict()), 201
+        prompt_id = p.id
     finally:
         s.close()
+
+    return jsonify({
+        "prompt_id": prompt_id,
+        "prompt": result["prompt"],
+        "negative_prompt": result["negative_prompt"],
+        "kling_hint": result["kling_hint"],
+        "reference_emotion": result.get("reference_emotion"),
+        "meta": result["meta"],
+    })
 
 
 @bp.get("/media/prompts")
@@ -556,6 +703,124 @@ def media_prompt_delete(prompt_id: int):
         return jsonify({"deleted": True})
     finally:
         s.close()
+
+
+# ============================================================
+# Media: direct image generation via gpt-image-2 (ProxyAPI)
+# ============================================================
+
+_ALLOWED_GPT_IMAGE_QUALITY_UI = {"low", "medium", "high"}  # auto скрываем от UI
+
+
+@bp.post("/media/generate-image")
+def media_generate_image():
+    """Прямая генерация картинки через ProxyAPI → gpt-image-2.
+
+    Body:
+      - prompt_id: int — id существующего MediaPrompt (предпочтительно, даёт связь)
+      - prompt: str   — сырой английский промпт (fallback, если нет prompt_id)
+      - size_preset: 'square' | 'vertical' | 'horizontal' | 'auto'
+      - quality: 'low' | 'medium' | 'high'
+    """
+    data = request.get_json(silent=True) or {}
+    raw_prompt_id = data.get("prompt_id")
+    raw_prompt = (data.get("prompt") or "").strip()
+    size_preset = (data.get("size_preset") or "square").strip()
+    quality = (data.get("quality") or "high").strip()
+    rubric_key = (data.get("rubric_key") or "").strip() or None
+    emotion = (data.get("emotion") or "").strip() or None
+    use_reference = bool(data.get("use_reference", True))
+
+    if size_preset not in config.GPT_IMAGE_SIZE_PRESETS:
+        return _err(f"size_preset должен быть одним из {set(config.GPT_IMAGE_SIZE_PRESETS)}.")
+    if quality not in _ALLOWED_GPT_IMAGE_QUALITY_UI:
+        return _err("quality должен быть 'low' | 'medium' | 'high'.")
+
+    # Резолвим промпт: prompt_id приоритетнее
+    prompt_text = ""
+    source_prompt_id: int | None = None
+    if raw_prompt_id not in (None, ""):
+        try:
+            source_prompt_id = int(raw_prompt_id)
+        except (TypeError, ValueError):
+            return _err("prompt_id должен быть числом.")
+        s = SessionLocal()
+        try:
+            p = s.get(MediaPrompt, source_prompt_id)
+            if p is None:
+                return _err("Промпт не найден.", 404)
+            if p.media_type != "image":
+                return _err("Промпт не для изображения.")
+            prompt_text = p.prompt_en
+        finally:
+            s.close()
+    elif raw_prompt:
+        prompt_text = raw_prompt
+    else:
+        return _err("Нужен prompt_id или prompt.")
+
+    size = config.GPT_IMAGE_SIZE_PRESETS[size_preset]
+
+    # Подбираем референс Лоры (если включён). Если файла нет — тихо откатываемся
+    # на обычный /generations без референса.
+    reference_path = None
+    reference_emotion = None
+    if use_reference:
+        ref = get_reference_path(rubric_key=rubric_key, emotion=emotion)
+        if ref is not None:
+            reference_path = ref
+            reference_emotion = resolve_emotion(rubric_key=rubric_key, emotion=emotion)
+
+    try:
+        provider = OpenAIImageProvider()
+        if reference_path is not None:
+            result = provider.generate_with_reference(
+                prompt=prompt_text,
+                reference_paths=[reference_path],
+                size=size,
+                quality=quality,
+                output_format="png",
+            )
+        else:
+            result = provider.generate(
+                prompt=prompt_text,
+                size=size,
+                quality=quality,
+                output_format="png",
+            )
+    except ImageError as e:
+        return _err(str(e), 502)
+
+    # Сохраняем MediaAsset со связью на промпт (если есть)
+    name_suffix = f"-{reference_emotion}" if reference_emotion else ""
+    s = SessionLocal()
+    try:
+        asset = MediaAsset(
+            kind="image",
+            file_path=result["file_path"],
+            original_name=f"gpt-image-2-{quality}{name_suffix}.png",
+            mime_type=result["mime_type"],
+            size_bytes=result["size_bytes"],
+            width=result["width"],
+            height=result["height"],
+            source="external_ai",
+            prompt_used=prompt_text[:2000],
+            source_prompt_id=source_prompt_id,
+        )
+        s.add(asset)
+        s.commit()
+        s.refresh(asset)
+        payload = asset.to_dict()
+        payload["reference_emotion"] = reference_emotion
+        return jsonify(payload), 201
+    finally:
+        s.close()
+
+
+@bp.get("/media/lora-emotions")
+def media_lora_emotions():
+    """Список доступных эмоций Лоры для UI-дропдауна."""
+    return jsonify(list_available_emotions())
 
 
 # ============================================================

@@ -1,4 +1,6 @@
-"""Провайдеры изображений: Kling AI (text-to-image) и ручная загрузка файла."""
+"""Провайдеры изображений: Kling AI (text-to-image), OpenAI gpt-image-2 через
+ProxyAPI и ручная загрузка файла."""
+import base64
 import io
 import logging
 import time
@@ -178,6 +180,263 @@ class KlingImageProvider(ImageProvider):
         out_path.write_bytes(content)
         # возвращаем относительный путь от static/uploads/
         return f"images/{filename}"
+
+
+# ============================================================
+# OpenAI gpt-image-2 через ProxyAPI
+# ============================================================
+
+class OpenAIImageProvider:
+    """Генерация картинки через ProxyAPI → OpenAI Images API (gpt-image-2).
+
+    Синхронный POST: ProxyAPI блокирует ответ, возвращает base64 готовой картинки.
+    Не наследует ImageProvider — иной интерфейс (size в пикселях, quality).
+    """
+
+    REQUEST_TIMEOUT_SEC = 360.0  # gpt-image-2 на high+1024 может занимать 3-5 минут
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+        self.api_key = (api_key or config.PROXYAPI_KEY).strip()
+        self.model = (model or config.OPENAI_IMAGE_MODEL).strip()
+
+    def generate(
+        self,
+        prompt: str,
+        size: str = "1024x1024",
+        quality: str = "high",
+        output_format: str = "png",
+    ) -> dict:
+        """Делает запрос на генерацию, сохраняет файл локально, возвращает метаданные.
+
+        Возвращает: {
+            "file_path": "images/<uuid>.png",
+            "width": int, "height": int,
+            "size_bytes": int,
+            "mime_type": "image/png",
+            "tokens_in": int | None,
+            "tokens_out": int | None,
+        }
+        """
+        if not self.api_key:
+            err = "Не задан PROXYAPI_KEY в .env."
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err)
+        if not prompt.strip():
+            raise ImageError("Пустой промпт картинки.")
+        if quality not in config.GPT_IMAGE_QUALITY_LEVELS:
+            raise ImageError(f"quality должен быть одним из {config.GPT_IMAGE_QUALITY_LEVELS}.")
+        if output_format not in ("png", "jpeg", "webp"):
+            raise ImageError("output_format должен быть png/jpeg/webp.")
+
+        body = {
+            "model": self.model,
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+            "quality": quality,
+            "output_format": output_format,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            with httpx.Client(timeout=self.REQUEST_TIMEOUT_SEC) as c:
+                r = c.post(config.PROXYAPI_OPENAI_IMAGES_URL, headers=headers, json=body)
+        except httpx.HTTPError as e:
+            err = f"Сеть недоступна при обращении к ProxyAPI: {e}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err) from e
+
+        if r.status_code >= 400:
+            err = f"ProxyAPI вернул {r.status_code}: {r.text[:500]}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err)
+
+        try:
+            data = r.json()
+        except ValueError as e:
+            err = f"Ответ ProxyAPI не JSON: {e}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err) from e
+
+        items = data.get("data") or []
+        if not items or not items[0].get("b64_json"):
+            err = f"ProxyAPI не вернул b64_json. Ответ: {str(data)[:400]}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err)
+
+        # Декодируем base64 → bytes → файл
+        try:
+            raw = base64.b64decode(items[0]["b64_json"])
+        except (ValueError, TypeError) as e:
+            err = f"Не удалось декодировать base64 от ProxyAPI: {e}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err) from e
+
+        ext = "jpg" if output_format == "jpeg" else output_format
+        filename = f"{uuid.uuid4().hex}.{ext}"
+        out_path: Path = config.IMAGES_DIR / filename
+        out_path.write_bytes(raw)
+
+        # Размеры — открываем через PIL (для последующего показа)
+        width = height = None
+        try:
+            with Image.open(out_path) as img:
+                width, height = img.size
+        except Exception:
+            pass
+
+        usage = data.get("usage") or {}
+        tokens_in = usage.get("input_tokens")
+        tokens_out = usage.get("output_tokens")
+
+        log_ai_call(
+            provider="proxyapi_openai",
+            request_type="image",
+            model=self.model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            success=True,
+        )
+
+        return {
+            "file_path": f"images/{filename}",
+            "width": width,
+            "height": height,
+            "size_bytes": len(raw),
+            "mime_type": f"image/{output_format if output_format != 'jpeg' else 'jpeg'}",
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+        }
+
+    def generate_with_reference(
+        self,
+        prompt: str,
+        reference_paths: list,
+        size: str = "1024x1024",
+        quality: str = "high",
+        output_format: str = "png",
+    ) -> dict:
+        """Генерация через /v1/images/edits с приложенными референсами.
+
+        OpenAI /edits принимает до 16 файлов в поле image[]. Возвращает b64_json
+        как и /generations. Используется для сохранения внешности Лоры.
+        """
+        if not self.api_key:
+            err = "Не задан PROXYAPI_KEY в .env."
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err)
+        if not prompt.strip():
+            raise ImageError("Пустой промпт картинки.")
+        if not reference_paths:
+            raise ImageError("Нужен хотя бы один референс для /edits.")
+        if quality not in config.GPT_IMAGE_QUALITY_LEVELS:
+            raise ImageError(f"quality должен быть одним из {config.GPT_IMAGE_QUALITY_LEVELS}.")
+        if output_format not in ("png", "jpeg", "webp"):
+            raise ImageError("output_format должен быть png/jpeg/webp.")
+
+        edits_url = config.PROXYAPI_OPENAI_IMAGES_URL.replace("/generations", "/edits")
+
+        files = []
+        opened = []
+        try:
+            for p in reference_paths:
+                f = open(p, "rb")
+                opened.append(f)
+                mime = "image/jpeg" if str(p).lower().endswith((".jpg", ".jpeg")) else "image/png"
+                files.append(("image[]", (Path(p).name, f, mime)))
+
+            data = {
+                "model": self.model,
+                "prompt": prompt,
+                "n": "1",
+                "size": size,
+                "quality": quality,
+                "output_format": output_format,
+            }
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+
+            try:
+                with httpx.Client(timeout=self.REQUEST_TIMEOUT_SEC) as c:
+                    r = c.post(edits_url, headers=headers, files=files, data=data)
+            except httpx.HTTPError as e:
+                err = f"Сеть недоступна при обращении к ProxyAPI /edits: {e}"
+                log_ai_call(provider="proxyapi_openai", request_type="image",
+                            model=self.model, success=False, error=err)
+                raise ImageError(err) from e
+        finally:
+            for f in opened:
+                try:
+                    f.close()
+                except OSError:
+                    pass
+
+        if r.status_code >= 400:
+            err = f"ProxyAPI /edits вернул {r.status_code}: {r.text[:500]}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err)
+
+        try:
+            data = r.json()
+        except ValueError as e:
+            err = f"Ответ ProxyAPI /edits не JSON: {e}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err) from e
+
+        items = data.get("data") or []
+        if not items or not items[0].get("b64_json"):
+            err = f"ProxyAPI /edits не вернул b64_json. Ответ: {str(data)[:400]}"
+            log_ai_call(provider="proxyapi_openai", request_type="image",
+                        model=self.model, success=False, error=err)
+            raise ImageError(err)
+
+        try:
+            raw = base64.b64decode(items[0]["b64_json"])
+        except (ValueError, TypeError) as e:
+            err = f"Не удалось декодировать base64 от ProxyAPI: {e}"
+            raise ImageError(err) from e
+
+        ext = "jpg" if output_format == "jpeg" else output_format
+        filename = f"{uuid.uuid4().hex}.{ext}"
+        out_path: Path = config.IMAGES_DIR / filename
+        out_path.write_bytes(raw)
+
+        width = height = None
+        try:
+            with Image.open(out_path) as img:
+                width, height = img.size
+        except Exception:
+            pass
+
+        usage = data.get("usage") or {}
+        tokens_in = usage.get("input_tokens")
+        tokens_out = usage.get("output_tokens")
+
+        log_ai_call(
+            provider="proxyapi_openai", request_type="image", model=self.model,
+            tokens_in=tokens_in, tokens_out=tokens_out, success=True,
+        )
+
+        return {
+            "file_path": f"images/{filename}",
+            "width": width,
+            "height": height,
+            "size_bytes": len(raw),
+            "mime_type": f"image/{output_format if output_format != 'jpeg' else 'jpeg'}",
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+        }
 
 
 # ============================================================

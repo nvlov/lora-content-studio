@@ -10,3 +10,7 @@ static/uploads/*
 .vscode/
 .idea/
 *.db
+
+# Локальные бренд-оригиналы Лоры (4K PNG, ~75 МБ) — не в репо.
+# Оптимизированные JPG (core/assets/optimized/*) остаются в репо.
+core/assets/*.png

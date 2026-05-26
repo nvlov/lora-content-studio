@@ -34,8 +34,14 @@ class ClaudeClient:
         system_prompt: str,
         user_message: str,
         max_tokens: int = 2000,
+        image_b64: Optional[str] = None,
+        image_media_type: str = "image/jpeg",
     ) -> dict:
-        """Возвращает {'text': str, 'tokens_in': int, 'tokens_out': int}."""
+        """Возвращает {'text': str, 'tokens_in': int, 'tokens_out': int}.
+
+        Если задан image_b64 — добавляет image-блок ПЕРЕД текстом
+        в первом user-сообщении (Anthropic рекомендует image→text для точности).
+        """
         if not self.api_key:
             err = "Не задан PROXYAPI_KEY в .env. Добавьте ключ ProxyAPI и перезапустите."
             log_ai_call(
@@ -50,11 +56,27 @@ class ClaudeClient:
             "anthropic-version": config.ANTHROPIC_VERSION,
             "Content-Type": "application/json",
         }
+
+        if image_b64:
+            user_content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image_media_type,
+                        "data": image_b64,
+                    },
+                },
+                {"type": "text", "text": user_message},
+            ]
+        else:
+            user_content = user_message
+
         body = {
             "model": self.model,
             "max_tokens": max_tokens,
             "system": system_prompt,
-            "messages": [{"role": "user", "content": user_message}],
+            "messages": [{"role": "user", "content": user_content}],
         }
 
         try:

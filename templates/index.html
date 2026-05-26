@@ -2,8 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=1280">
-  <title>Lora Content Studio v0.2</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lora Content Studio</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -13,124 +13,311 @@
     <span class="brand__mark">L</span>
     <div>
       <div class="brand__title">Lora Content Studio</div>
-      <div class="brand__sub">Контент для VK-сообщества · v0.2</div>
+      <div class="brand__sub">контент для VK</div>
     </div>
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab is-active" data-tab="create" role="tab" aria-selected="true">Создать пост</button>
+    <button class="tab" data-tab="video" role="tab" aria-selected="false">Создать видео</button>
+    <button class="tab" data-tab="image" role="tab" aria-selected="false">Создать изображение</button>
     <button class="tab" data-tab="library" role="tab" aria-selected="false">Библиотека</button>
-    <button class="tab" data-tab="media" role="tab" aria-selected="false">Медиа</button>
-    <button class="tab" data-tab="settings" role="tab" aria-selected="false">Настройки</button>
+    <button class="tab tab--icon" data-tab="settings" role="tab" aria-selected="false" title="Настройки" aria-label="Настройки">
+      <span class="icon" data-icon="settings"></span>
+    </button>
   </nav>
 </header>
 
 <main class="container">
 
-  <!-- ============ CREATE ============ -->
+  <!-- ============ CREATE POST ============ -->
   <section class="view view--create is-active" data-view="create">
-    <div class="grid grid--editor">
+    <div class="container--narrow" style="margin:0 auto;">
 
-      <aside class="card card--editor">
-        <h2 class="h2">1. Рубрика</h2>
-        <div class="rubrics" id="rubrics-list"></div>
+      <h2 class="h2">Рубрика</h2>
+      <div class="rubrics" id="rubrics-list"></div>
 
-        <div id="topic-block">
-          <h2 class="h2">2. Тема <span class="muted small">(необязательно)</span></h2>
-          <input type="text" id="topic" class="input"
-                 placeholder='Например: «procrastinate» или оставь пустым'>
-        </div>
+      <div id="topic-block">
+        <h2 class="h2">Тема <span class="muted small" style="text-transform:none;letter-spacing:0;">(необязательно)</span></h2>
+        <input type="text" id="topic" class="input"
+               placeholder='например: «procrastinate»'>
+      </div>
 
-        <div id="free-topic-block" hidden>
-          <h2 class="h2">2. Описание задачи</h2>
-          <textarea id="free-topic" class="textarea" rows="4"
-                    placeholder='Опишите задачу: например, "напиши пост-анонс к Дню Святого Валентина с парой романтических идиом"'></textarea>
-        </div>
+      <div id="free-topic-block" hidden>
+        <h2 class="h2">Описание задачи</h2>
+        <textarea id="free-topic" class="textarea" rows="4"
+                  placeholder='например: "напиши пост-анонс к Дню Святого Валентина с парой романтических идиом"'></textarea>
+      </div>
 
-        <button id="btn-generate-text" class="btn btn--primary btn--block" title="Ctrl+Enter">
+      <div class="actions-row" style="margin-top:var(--space-md);">
+        <button id="btn-generate-text" class="btn btn--primary" title="Ctrl+Enter">
           <span class="icon" data-icon="sparkles"></span>
           <span>Сгенерировать текст</span>
           <span class="hk">Ctrl+Enter</span>
         </button>
-
-        <h2 class="h2">3. Текст поста</h2>
-        <textarea id="post-text" class="textarea" rows="14"
-                  placeholder="Здесь появится текст…"></textarea>
-        <div class="char-counter" id="char-counter"><span id="char-count">0</span> / 4096</div>
-
-        <button id="btn-regenerate-text" class="btn btn--ghost btn--block">
+        <button id="btn-regenerate-text" class="btn btn--ghost">
           <span class="icon" data-icon="refresh"></span>
           <span>Регенерировать</span>
         </button>
+      </div>
 
-        <h2 class="h2">4. Медиа поста</h2>
-        <div class="image-actions">
-          <button id="btn-generate-image" class="btn btn--secondary">
-            <span class="icon" data-icon="image"></span>
-            <span>Сгенерировать через Kling</span>
-          </button>
-          <label class="btn btn--ghost">
-            <span class="icon" data-icon="upload"></span>
-            <span>Загрузить файл</span>
-            <input type="file" id="file-upload" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" hidden>
-          </label>
-          <button id="btn-pick-from-library" class="btn btn--ghost">
-            <span class="icon" data-icon="folder"></span>
-            <span>Из медиа-библиотеки</span>
-          </button>
-        </div>
-        <div id="image-status" class="muted small status-line"></div>
-        <div id="kling-progress" class="kling-progress" hidden>
-          <span class="spinner"></span>
-          <span class="kling-progress__text">Идёт генерация… <span id="kling-timer">0</span> сек</span>
-          <div class="muted small">Это занимает 1–2 минуты, не закрывай вкладку</div>
-        </div>
+      <h2 class="h2">Текст поста</h2>
+      <textarea id="post-text" class="textarea" rows="14"
+                placeholder="Здесь появится текст…"></textarea>
+      <div class="char-counter" id="char-counter"><span id="char-count">0</span> / 4096</div>
 
-        <div class="actions-row">
-          <button id="btn-save" class="btn btn--primary" title="Ctrl+S">
-            <span class="icon" data-icon="save"></span>
-            <span>Сохранить как черновик</span>
-            <span class="hk">Ctrl+S</span>
-          </button>
-          <button id="btn-publish-now" class="btn btn--secondary" title="Ctrl+P" disabled>
-            <span class="icon" data-icon="send"></span>
-            <span>Опубликовать сейчас</span>
-          </button>
-          <button id="btn-schedule" class="btn btn--ghost" disabled>
-            <span class="icon" data-icon="clock"></span>
-            <span>Запланировать</span>
-          </button>
-        </div>
-        <div id="vk-not-configured" class="muted small status-line" hidden>
-          Настрой VK_COMMUNITY_TOKEN и VK_GROUP_ID в .env, чтобы публиковать (см. README).
-        </div>
-        <div id="parent-info" class="muted small status-line" hidden></div>
-        <button id="btn-new" class="btn btn--ghost btn--sm" style="margin-top:1rem">
-          <span class="icon" data-icon="plus"></span>
-          <span>Новый пост</span>
+      <div class="actions-row">
+        <button id="btn-save" class="btn btn--primary" title="Ctrl+S">
+          <span class="icon" data-icon="save"></span>
+          <span>Сохранить</span>
+          <span class="hk">Ctrl+S</span>
         </button>
-      </aside>
-
-      <aside class="card card--preview">
-        <h2 class="h2">Превью «как в ВК»</h2>
-        <div class="vk-post">
-          <div class="vk-post__head">
-            <div class="vk-post__avatar">L</div>
-            <div>
-              <div class="vk-post__author">Лора | Английский с AI-репетитором</div>
-              <div class="vk-post__time muted">только что · <span id="preview-rubric">—</span></div>
-            </div>
-          </div>
-          <div class="vk-post__text" id="preview-text">Текст поста появится здесь…</div>
-          <div class="vk-post__media" id="preview-media">
-            <div class="vk-post__image-placeholder">Медиа появится здесь</div>
-          </div>
-        </div>
-      </aside>
-
+        <button id="btn-publish-now" class="btn btn--secondary" title="Ctrl+P" disabled>
+          <span class="icon" data-icon="send"></span>
+          <span>Опубликовать сейчас</span>
+        </button>
+        <button id="btn-schedule" class="btn btn--ghost" disabled>
+          <span class="icon" data-icon="clock"></span>
+          <span>Запланировать</span>
+        </button>
+        <button id="btn-new" class="btn btn--ghost btn--sm" style="margin-left:auto;">
+          <span class="icon" data-icon="plus"></span>
+          <span>Новый</span>
+        </button>
+      </div>
+      <div id="vk-not-configured" class="muted small status-line" hidden>
+        VK не настроен — заполни VK_GROUP_ID и токен в .env, чтобы публиковать.
+      </div>
+      <div id="parent-info" class="muted small status-line" hidden></div>
     </div>
   </section>
 
-  <!-- ============ LIBRARY ============ -->
+  <!-- ============ VIDEO ============ -->
+  <section class="view view--video" data-view="video">
+    <div class="container--narrow" style="margin:0 auto;">
+
+      <h2 class="h2">Режим</h2>
+      <div class="mode-radio" id="video-mode-radio">
+        <label class="mode-radio__option is-selected">
+          <input type="radio" name="video-mode" value="silent" class="mode-radio__input" checked>
+          <div>
+            <div class="mode-radio__title">Без звука</div>
+            <div class="mode-radio__desc">Видеоряд для монтажа или поста-открытки. Kling 2.6 / 3.0 Standard.</div>
+          </div>
+        </label>
+        <label class="mode-radio__option">
+          <input type="radio" name="video-mode" value="audio_en" class="mode-radio__input">
+          <div>
+            <div class="mode-radio__title">С речью (English)</div>
+            <div class="mode-radio__desc">Kling 3.0 Omni, нативный lip-sync. Только английская речь.</div>
+          </div>
+        </label>
+      </div>
+
+      <h2 class="h2">Идея</h2>
+      <textarea id="video-idea" class="textarea" rows="3"
+                placeholder='Например: "Лора объясняет грамматику у доски в уютном классе"'></textarea>
+
+      <div id="video-speech-block" hidden>
+        <h2 class="h2">Реплика (что Лора говорит)</h2>
+        <textarea id="video-dialog" class="textarea" rows="2"
+                  placeholder='Например: "Hi friends! Let'+"'"+'s start today'+"'"+'s lesson — it'+"'"+'s gonna be fun."'></textarea>
+        <label class="label">Интонация голоса</label>
+        <select id="video-voice-tone" class="input input--select">
+          <option value="warm friendly">warm friendly</option>
+          <option value="cheerful">cheerful</option>
+          <option value="calm encouraging">calm encouraging</option>
+          <option value="playful">playful</option>
+          <option value="confident teacher">confident teacher</option>
+        </select>
+      </div>
+
+      <h2 class="h2">Параметры Kling</h2>
+      <div class="form-row-3">
+        <div>
+          <label class="label">Длительность</label>
+          <select id="video-duration" class="input input--select">
+            <option value="5">5 сек</option>
+            <option value="10">10 сек</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Кадр</label>
+          <select id="video-aspect" class="input input--select">
+            <option value="16:9">16:9 горизонталь</option>
+            <option value="9:16">9:16 вертикаль</option>
+            <option value="1:1">1:1 квадрат</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Стиль</label>
+          <select id="video-style" class="input input--select">
+            <option value="pixar_3d_brand">Pixar-3D брендовый</option>
+            <option value="photo_realistic">Photo-realistic</option>
+            <option value="cinematic">Cinematic</option>
+            <option value="flat_illustration">Flat illustration</option>
+            <option value="watercolor">Watercolor</option>
+          </select>
+        </div>
+      </div>
+      <label class="label">Движение камеры</label>
+      <select id="video-camera" class="input input--select">
+        <option value="static">без движения</option>
+        <option value="pan_left">pan влево</option>
+        <option value="pan_right">pan вправо</option>
+        <option value="dolly_in">dolly in (наезд)</option>
+        <option value="dolly_out">dolly out (отъезд)</option>
+        <option value="tilt_up">tilt вверх</option>
+        <option value="tracking">tracking</option>
+        <option value="rotate_360">rotate 360</option>
+      </select>
+
+      <h2 class="h2">Эмоция Лоры <span class="muted small" style="text-transform:none;letter-spacing:0;">— референс для Claude</span></h2>
+      <select id="video-emotion" class="input input--select" data-lora-emotion></select>
+
+      <h2 class="h2">Что избегать <span class="muted small" style="text-transform:none;letter-spacing:0;">(опционально)</span></h2>
+      <textarea id="video-negative" class="textarea" rows="2"
+                placeholder='например: морфинг лица, искажение рук, размытие'></textarea>
+
+      <div class="actions-row" style="margin-top:var(--space-md);">
+        <button id="btn-generate-video-prompt" class="btn btn--primary btn--block">
+          <span class="icon" data-icon="sparkles"></span>
+          <span>Сгенерировать промпт</span>
+        </button>
+      </div>
+      <div id="video-prompt-status" class="muted small status-line"></div>
+
+      <div id="video-prompt-result" hidden>
+        <h2 class="h2">Промпт для Kling</h2>
+        <div id="video-prompt-text" class="prompt-output"></div>
+        <div id="video-prompt-hint" class="prompt-hint"></div>
+        <div class="actions-row">
+          <button id="btn-copy-video-prompt" class="btn btn--secondary">
+            <span class="icon" data-icon="copy"></span><span>Копировать промпт</span>
+          </button>
+          <button id="btn-copy-video-negative" class="btn btn--ghost">
+            <span class="icon" data-icon="copy"></span><span>Копировать negative</span>
+          </button>
+          <a id="btn-open-kling" class="btn btn--ghost" href="https://app.klingai.com/" target="_blank" rel="noopener">
+            <span class="icon" data-icon="external"></span><span>Открыть Kling</span>
+          </a>
+        </div>
+
+        <h2 class="h2">Загрузить результат</h2>
+        <div class="muted small status-line" style="margin-bottom:0.5rem;">Файл привяжется к промпту выше — это нужно для оценки.</div>
+        <div id="video-dropzone" class="dropzone">
+          <div class="dropzone__inner">
+            <span class="icon icon--lg" data-icon="upload"></span>
+            <div>Перетащи MP4 / WebM / MOV сюда или
+              <label class="link">выбери файл
+                <input type="file" id="video-file-input" accept="video/mp4,video/webm,video/quicktime" hidden>
+              </label>
+            </div>
+            <div class="muted small">до 200 МБ</div>
+          </div>
+        </div>
+        <div id="video-upload-status" class="muted small status-line"></div>
+      </div>
+
+      <h2 class="h2">История</h2>
+      <div class="library-toolbar">
+        <select id="video-history-filter" class="input input--select">
+          <option value="">Все режимы</option>
+          <option value="silent">Без звука</option>
+          <option value="audio_en">С речью (EN)</option>
+        </select>
+        <button id="btn-video-refresh" class="btn btn--ghost btn--sm">Обновить</button>
+      </div>
+      <div id="video-history-grid" class="media-grid"></div>
+      <div id="video-history-empty" class="muted center small" hidden>
+        Пока пусто. Сгенерируй промпт и загрузи результат — он появится здесь.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ IMAGE ============ -->
+  <section class="view view--image" data-view="image">
+    <div class="container--narrow" style="margin:0 auto;">
+
+      <h2 class="h2">Идея</h2>
+      <textarea id="image-idea" class="textarea" rows="3"
+                placeholder='Например: "Лора с книгой на фоне уютного класса"'></textarea>
+
+      <h2 class="h2">Параметры</h2>
+      <div class="form-row-3">
+        <div>
+          <label class="label">Размер</label>
+          <select id="image-size" class="input input--select">
+            <option value="square">Квадрат (1024×1024)</option>
+            <option value="vertical">Вертикаль (1024×1536)</option>
+            <option value="horizontal">Горизонталь (1536×1024)</option>
+            <option value="auto">Авто (модель выбирает)</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Качество</label>
+          <select id="image-quality" class="input input--select">
+            <option value="low">Черновик</option>
+            <option value="medium">Стандарт</option>
+            <option value="high" selected>Финал</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Стиль</label>
+          <select id="image-style" class="input input--select">
+            <option value="pixar_3d_brand">Pixar-3D брендовый</option>
+            <option value="photo_realistic">Photo-realistic</option>
+            <option value="cinematic">Cinematic</option>
+            <option value="flat_illustration">Flat illustration</option>
+            <option value="watercolor">Watercolor</option>
+          </select>
+        </div>
+      </div>
+
+      <h2 class="h2">Эмоция Лоры <span class="muted small" style="text-transform:none;letter-spacing:0;">— референс для Claude и gpt-image-2</span></h2>
+      <select id="image-emotion" class="input input--select" data-lora-emotion></select>
+
+      <h2 class="h2">Что избегать <span class="muted small" style="text-transform:none;letter-spacing:0;">(опционально)</span></h2>
+      <textarea id="image-negative" class="textarea" rows="2"
+                placeholder='например: text overlays, distorted hands'></textarea>
+
+      <div class="actions-row" style="margin-top:var(--space-md);">
+        <button id="btn-generate-image-prompt" class="btn btn--secondary">
+          <span class="icon" data-icon="sparkles"></span>
+          <span>Сгенерировать промпт</span>
+        </button>
+        <button id="btn-generate-image-direct" class="btn btn--primary">
+          <span class="icon" data-icon="sparkles"></span>
+          <span>Сгенерировать изображение</span>
+        </button>
+      </div>
+      <div id="image-prompt-status" class="muted small status-line"></div>
+
+      <div id="image-prompt-result" hidden>
+        <h2 class="h2">Промпт для gpt-image-2</h2>
+        <div id="image-prompt-text" class="prompt-output"></div>
+        <div id="image-prompt-hint" class="prompt-hint"></div>
+        <div class="actions-row">
+          <button id="btn-copy-image-prompt" class="btn btn--secondary">
+            <span class="icon" data-icon="copy"></span><span>Копировать промпт</span>
+          </button>
+          <button id="btn-render-from-prompt" class="btn btn--primary">
+            <span class="icon" data-icon="sparkles"></span><span>Сгенерировать по этому промпту</span>
+          </button>
+        </div>
+      </div>
+
+      <h2 class="h2">История</h2>
+      <div class="library-toolbar">
+        <button id="btn-image-refresh" class="btn btn--ghost btn--sm">Обновить</button>
+      </div>
+      <div id="image-history-grid" class="media-grid"></div>
+      <div id="image-history-empty" class="muted center small" hidden>
+        Пока пусто. Сгенерируй промпт или сразу изображение — результат появится здесь.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LIBRARY (posts) ============ -->
   <section class="view view--library" data-view="library">
     <div class="library-toolbar">
       <input type="text" id="lib-search" class="input" placeholder="Поиск по тексту и теме…">
@@ -144,100 +331,18 @@
         <option value="published">Опубликовано</option>
         <option value="publish_failed">Ошибка</option>
       </select>
-      <button id="btn-lib-refresh" class="btn btn--ghost">Обновить</button>
+      <button id="btn-lib-refresh" class="btn btn--ghost btn--sm">Обновить</button>
     </div>
     <div class="library-grid" id="library-grid"></div>
     <div id="library-empty" class="muted center" hidden>
-      Пока нет сохранённых черновиков. Создай первый!
-    </div>
-  </section>
-
-  <!-- ============ MEDIA ============ -->
-  <section class="view view--media" data-view="media">
-    <div class="grid grid--media">
-
-      <aside class="card">
-        <h2 class="h2">Генератор промптов для image / video</h2>
-        <p class="muted small">Опиши идею на русском — Claude вернёт 3 варианта детального английского промпта для Kling AI / utopy.ai / MidJourney.</p>
-
-        <label class="label">Идея на русском</label>
-        <textarea id="prompt-idea" class="textarea" rows="3"
-                  placeholder='Например: "Лора объясняет грамматику у доски в уютном классе"'></textarea>
-
-        <div class="form-row">
-          <div>
-            <label class="label">Тип медиа</label>
-            <div class="radio-row">
-              <label class="radio"><input type="radio" name="media-type" value="image" checked> Изображение</label>
-              <label class="radio"><input type="radio" name="media-type" value="video"> Видео</label>
-            </div>
-          </div>
-          <div>
-            <label class="label">Стиль</label>
-            <select id="prompt-style" class="input input--select">
-              <option value="pixar_3d_brand">Pixar-3D (фирменный)</option>
-              <option value="photo_realistic">Photo-realistic</option>
-              <option value="flat_illustration">Flat illustration</option>
-              <option value="watercolor">Акварель</option>
-              <option value="cinematic">Cinematic</option>
-            </select>
-          </div>
-          <div>
-            <label class="label">Соотношение сторон</label>
-            <select id="prompt-ratio" class="input input--select">
-              <option value="1:1">1:1 (квадрат)</option>
-              <option value="9:16">9:16 (Stories)</option>
-              <option value="16:9">16:9 (горизонталь)</option>
-            </select>
-          </div>
-        </div>
-
-        <button id="btn-generate-prompts" class="btn btn--primary btn--block">
-          <span class="icon" data-icon="sparkles"></span>
-          <span>Сгенерировать 3 варианта</span>
-        </button>
-        <div id="prompts-status" class="muted small status-line"></div>
-
-        <div id="prompts-result" class="prompts-result"></div>
-
-        <h2 class="h2" style="margin-top:2rem">Сохранённые промпты</h2>
-        <div id="saved-prompts" class="saved-prompts"></div>
-      </aside>
-
-      <aside class="card">
-        <h2 class="h2">Медиа-библиотека</h2>
-        <div id="media-dropzone" class="dropzone">
-          <div class="dropzone__inner">
-            <div class="dropzone__icon"><span class="icon icon--lg" data-icon="upload"></span></div>
-            <div>Перетащи файлы сюда или <label class="link">выбери на диске
-              <input type="file" id="media-file-input" multiple
-                     accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" hidden>
-            </label></div>
-            <div class="muted small">Изображения до 10 МБ (jpg/png/webp), видео до 200 МБ (mp4/webm/mov)</div>
-          </div>
-        </div>
-        <div id="media-upload-status" class="muted small status-line"></div>
-
-        <div class="library-toolbar" style="margin-top:1rem">
-          <select id="media-kind-filter" class="input input--select">
-            <option value="">Все типы</option>
-            <option value="image">Только картинки</option>
-            <option value="video">Только видео</option>
-          </select>
-          <button id="btn-media-refresh" class="btn btn--ghost">Обновить</button>
-        </div>
-        <div id="media-grid" class="media-grid"></div>
-        <div id="media-empty" class="muted center" hidden>
-          В медиа-библиотеке пока пусто.
-        </div>
-      </aside>
+      Пока нет сохранённых черновиков.
     </div>
   </section>
 
   <!-- ============ SETTINGS ============ -->
   <section class="view view--settings" data-view="settings">
     <div class="muted small settings-hint">
-      Подсказка: <code>{topic}</code> в шаблоне картинки заменяется на тему поста.
+      Системные промпты рубрик. Подсказка: <code>{topic}</code> в шаблоне картинки заменяется на тему.
     </div>
     <div id="settings-list" class="settings-list"></div>
   </section>
@@ -256,17 +361,6 @@
     <div class="modal__actions">
       <button class="btn btn--ghost" id="modal-cancel">Отмена</button>
       <button class="btn btn--primary" id="modal-confirm">OK</button>
-    </div>
-  </div>
-</div>
-
-<!-- Модалка picker для медиа -->
-<div id="picker-overlay" class="modal-overlay" hidden>
-  <div class="modal modal--wide" role="dialog" aria-modal="true">
-    <h3 class="modal__title">Выбор медиа из библиотеки</h3>
-    <div id="picker-grid" class="media-grid media-grid--picker"></div>
-    <div class="modal__actions">
-      <button class="btn btn--ghost" id="picker-close">Закрыть</button>
     </div>
   </div>
 </div>

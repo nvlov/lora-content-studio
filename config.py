@@ -42,7 +42,7 @@ FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "dev-insecure-change-me")
 FLASK_ENV = os.getenv("FLASK_ENV", "development")
 
 # === Параметры LLM ===
-LLM_MODEL = os.getenv("LLM_MODEL", "claude-sonnet-4-5-20250929")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-opus-4-7")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2000"))
 
 # === Пути ===
@@ -69,6 +69,20 @@ APP_LOG_PATH = LOGS_DIR / "app.log"
 # ProxyAPI: проксирует Anthropic Messages API
 PROXYAPI_ANTHROPIC_URL = "https://api.proxyapi.ru/anthropic/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
+
+# ProxyAPI: проксирует OpenAI Images API (gpt-image-2)
+PROXYAPI_OPENAI_IMAGES_URL = "https://api.proxyapi.ru/openai/v1/images/generations"
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
+
+# Пресеты size для gpt-image-2 (ключ → строка для API).
+# Кратно 16 px, отношение сторон ≤ 3:1, max 3840 px.
+GPT_IMAGE_SIZE_PRESETS = {
+    "square":     "1024x1024",   # квадрат для VK поста
+    "vertical":   "1024x1536",   # сторис / вертикальное превью
+    "horizontal": "1536x1024",   # горизонталь / обложка
+    "auto":       "auto",        # модель выбирает сама
+}
+GPT_IMAGE_QUALITY_LEVELS = {"low", "medium", "high", "auto"}
 
 # Kling AI v1 — text2image
 KLING_BASE_URL = os.getenv("KLING_BASE_URL", "https://api-singapore.klingai.com").strip()

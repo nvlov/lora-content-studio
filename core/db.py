@@ -80,6 +80,77 @@ def migrate_to_v0_2() -> None:
             log.info("v0.2 миграция БД: добавлены колонки %s", added)
 
 
+# Колонки v0.3.2 — связь медиа↔промпт + оценка, Kling-специфичные поля промпта.
+_MEDIA_ASSET_COLUMNS_V0_3_2 = [
+    ("source_prompt_id", "INTEGER"),
+    ("rating", "INTEGER"),
+    ("feedback_notes", "TEXT"),
+]
+_MEDIA_PROMPT_COLUMNS_V0_3_2 = [
+    ("negative_prompt_en", "TEXT"),
+    ("duration", "INTEGER"),
+    ("camera_movement", "VARCHAR(32)"),
+    ("video_mode", "VARCHAR(16)"),
+    ("dialog_en", "TEXT"),
+    ("voice_tone", "VARCHAR(64)"),
+]
+
+
+def migrate_to_v0_3_2() -> None:
+    """ALTER TABLE для v0.3.2: новые поля в media_assets и media_prompts. Идемпотентно."""
+    with engine.begin() as conn:
+        # media_assets — добавляем только если таблица существует (create_all создаст её
+        # со всеми колонками при первом запуске).
+        ma_present = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='media_assets'")
+        ).first()
+        if ma_present:
+            existing = _existing_columns(conn, "media_assets")
+            added_ma = []
+            for col_name, col_def in _MEDIA_ASSET_COLUMNS_V0_3_2:
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE media_assets ADD COLUMN {col_name} {col_def}"))
+                    added_ma.append(col_name)
+            if added_ma:
+                log.info("v0.3.2 миграция media_assets: добавлены колонки %s", added_ma)
+
+        mp_present = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='media_prompts'")
+        ).first()
+        if mp_present:
+            existing = _existing_columns(conn, "media_prompts")
+            added_mp = []
+            for col_name, col_def in _MEDIA_PROMPT_COLUMNS_V0_3_2:
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE media_prompts ADD COLUMN {col_name} {col_def}"))
+                    added_mp.append(col_name)
+            if added_mp:
+                log.info("v0.3.2 миграция media_prompts: добавлены колонки %s", added_mp)
+
+
+def migrate_rating_scale_to_signed() -> None:
+    """Переводит rating с шкалы 1..5 на -2..+2 сдвигом на -3. Идемпотентно:
+    запускается только если в данных есть значения > 2 (признак старой шкалы)."""
+    with engine.begin() as conn:
+        ma_present = conn.execute(
+            text("SELECT name FROM sqlite_master WHERE type='table' AND name='media_assets'")
+        ).first()
+        if not ma_present:
+            return
+        existing = _existing_columns(conn, "media_assets")
+        if "rating" not in existing:
+            return
+        max_rating = conn.execute(
+            text("SELECT MAX(rating) FROM media_assets WHERE rating IS NOT NULL")
+        ).scalar()
+        if max_rating is None or max_rating <= 2:
+            return
+        result = conn.execute(
+            text("UPDATE media_assets SET rating = rating - 3 WHERE rating IS NOT NULL")
+        )
+        log.info("Миграция шкалы оценок 1..5 → -2..+2: обновлено %s строк", result.rowcount)
+
+
 def migrate_uploads_v0_2() -> None:
     """Переносит файлы из static/uploads/*.{jpg,png,webp} в static/uploads/images/.
     Обновляет Post.image_path. Идемпотентно — если файл уже в images/, ничего не делает."""
@@ -150,9 +221,11 @@ def seed_new_rubrics_v0_2() -> None:
 # ============================================================
 
 def init_db() -> None:
-    """Создаёт таблицы, мигрирует схему v0.2, засеивает рубрики и переносит файлы."""
+    """Создаёт таблицы, мигрирует схему, засеивает рубрики и переносит файлы."""
     # 1) ALTER старых таблиц — ДО create_all, чтобы create_all не пытался переопределять
     migrate_to_v0_2()
+    migrate_to_v0_3_2()
+    migrate_rating_scale_to_signed()
 
     # 2) Создание новых таблиц (media_assets, media_prompts) и недостающих
     Base.metadata.create_all(bind=engine)
