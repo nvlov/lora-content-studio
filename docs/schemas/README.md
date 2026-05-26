@@ -6,7 +6,7 @@
 
 ### `lora-post-v1.json`
 
-Схема черновика поста, который генерирует Skill [`lora-post-builder`](~/.claude/skills/lora-post-builder/SKILL.md) и импортирует CLI-команда `manage.py import-from-json`.
+Схема черновика поста, который генерирует Skill [`lora-post-builder`](../../.claude/skills/lora-post-builder/SKILL.md) и импортирует CLI-команда `manage.py import-from-json`.
 
 **Где живут файлы по этой схеме:** `data/inbox/text/YYYY-MM-DD-<rubric>-<slug>.json` (папка в `.gitignore`, рабочий буфер между Skill и БД).
 

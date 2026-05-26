@@ -17,12 +17,21 @@
 | 7 | 2026-05-26 | **v0.4.0** | [Структурный рефакторинг — publishers/generators/storage, CLI, Telegram-заглушка](docs/sessions/2026-05-26-session-v0.4.0.md) | 🔧 К работе через CLI |
 
 ## Текущая версия
-**v0.4.0** — структурный рефакторинг под расширение SMM:
+**v0.4.0** — структурный рефакторинг под расширение SMM + Skill-инфраструктура:
+
+Часть A (структура):
 - `core/` декомпозирован на `publishers/` (vk + telegram заглушка + youtube/tiktok placeholders), `generators/` (Claude + gpt-image-2), `storage/` (SQLAlchemy), `ingest/` + `analytics/` (пустые пакеты под перспективу).
 - CLI `manage.py` — параллельный к Flask UI терминальный интерфейс.
 - Мультиплатформенная публикация: `Post.target_platforms` (JSON) + таблица `post_publications`.
 - Бренд-ассеты вынесены из кодовой папки: `core/assets/` → `assets/lora/`.
 - Корень проекта подчищен: новые папки `references/`, `briefs/`, `tmp/`; `tasks/` разбит на `active/` и `archive/`; `docs/` сгруппирован по типу.
+
+Часть B (гибридный workflow — обход задержки ProxyAPI):
+- Откат `LLM_MODEL` на `claude-sonnet-4-5-20250929` (ProxyAPI пока не подхватил 4.6/4.7 — возвращает 503 upstream connect error).
+- Skill `.claude/skills/lora-post-builder/SKILL.md` — Claude в чате генерирует текст и промпты через свою свежую модель, минуя ProxyAPI.
+- CLI команды `show-rubric <key>` и `import-from-json <file>` — мост между Skill (JSON-буфер) и БД проекта.
+- Картинки рендерит проект через `gpt-image-2 /v1/images/edits` с референсом эмоции Лоры.
+- Артефакты в репо: `docs/schemas/lora-post-v1.json`, `references/lora-voice-guide.md`.
 
 ## Предыдущая версия
 **v0.3.3** — две независимые части:
