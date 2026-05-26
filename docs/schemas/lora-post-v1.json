@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Lora Post Draft (lora-post/v1)",
+  "description": "JSON-черновик поста, сгенерированный Skill lora-post-builder и импортируемый в БД через manage.py import-from-json.",
+  "type": "object",
+  "required": ["schema_version", "rubric_key", "topic", "emotion", "platforms", "image_prompt"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "lora-post/v1"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "enum": ["url", "text", "idea"]},
+        "url": {"type": "string", "format": "uri"},
+        "title": {"type": "string"},
+        "fetched_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "rubric_key": {
+      "type": "string",
+      "enum": [
+        "word_of_day",
+        "common_mistake",
+        "phrase_from_life",
+        "grammar_simple",
+        "business_english",
+        "slang_informal",
+        "mini_fact",
+        "free_topic"
+      ]
+    },
+    "topic": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "emotion": {
+      "type": "string",
+      "enum": ["greetings", "praises", "corrects", "explains", "thinks", "surprise", "neutral"]
+    },
+    "platforms": {
+      "type": "object",
+      "required": ["vk"],
+      "additionalProperties": false,
+      "properties": {
+        "vk": {
+          "type": "object",
+          "required": ["content"],
+          "properties": {
+            "content": {"type": "string", "minLength": 10, "maxLength": 4096}
+          }
+        },
+        "telegram": {
+          "type": "object",
+          "required": ["content"],
+          "properties": {
+            "content": {"type": "string", "minLength": 10, "maxLength": 4096}
+          }
+        }
+      }
+    },
+    "image_prompt": {
+      "type": "string",
+      "minLength": 20
+    },
+    "kling_prompt": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

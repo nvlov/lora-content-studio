@@ -261,6 +261,173 @@ def cmd_publish(args) -> int:
     return 1 if had_failure and not results else 0
 
 
+def cmd_show_rubric(args) -> int:
+    """Печатает поля рубрики (для использования из Skill lora-post-builder)."""
+    init_db()
+    s = SessionLocal()
+    try:
+        r = s.get(Rubric, args.key)
+        if not r:
+            print(f"Рубрика {args.key!r} не найдена.", file=sys.stderr)
+            print("Доступные:", file=sys.stderr)
+            for row in s.query(Rubric).all():
+                print(f"  - {row.key}: {row.name}", file=sys.stderr)
+            return 1
+        print(f"=== Рубрика {r.key} ({r.name}) ===")
+        print(f"Emoji-якорь: {r.emoji}")
+        print()
+        print("--- system_prompt ---")
+        print(r.system_prompt)
+        print()
+        print("--- image_prompt_template ---")
+        print(r.image_prompt_template)
+    finally:
+        s.close()
+    return 0
+
+
+def _slug_from_json_topic(topic: str, max_len: int = 30) -> str:
+    """Простой slug из топика — для логирования. Не используется в имени поста."""
+    s = (topic or "").lower().strip()
+    out = []
+    for ch in s:
+        if ch.isalnum() or ch in "-_":
+            out.append(ch)
+        elif ch.isspace():
+            out.append("-")
+    slug = "".join(out)[:max_len].strip("-")
+    return slug or "post"
+
+
+def cmd_import_from_json(args) -> int:
+    """Импортирует JSON-черновик от Skill lora-post-builder в БД.
+
+    По умолчанию генерирует картинку через gpt-image-2 /v1/images/edits
+    с референсом эмоции Лоры. Флаг --no-image отключает генерацию.
+    """
+    import json as _json
+    from core.generators.lora_references import get_reference_path
+
+    init_db()
+
+    json_path = Path(args.file).resolve()
+    if not json_path.exists():
+        print(f"Файл не найден: {json_path}", file=sys.stderr)
+        return 1
+    try:
+        with json_path.open("r", encoding="utf-8") as f:
+            payload = _json.load(f)
+    except _json.JSONDecodeError as e:
+        print(f"Невалидный JSON: {e}", file=sys.stderr)
+        return 1
+
+    # Минимальная валидация. Полная — через ajv / jsonschema по data/inbox/text/_schema.json.
+    required = ("rubric_key", "topic", "emotion", "platforms", "image_prompt")
+    missing = [k for k in required if k not in payload]
+    if missing:
+        print(f"В JSON нет обязательных полей: {missing}", file=sys.stderr)
+        return 1
+    if "vk" not in payload["platforms"] or "content" not in payload["platforms"]["vk"]:
+        print("В JSON отсутствует platforms.vk.content", file=sys.stderr)
+        return 1
+
+    rubric_key = payload["rubric_key"]
+    topic = payload.get("topic", "") or ""
+    emotion = payload["emotion"]
+    vk_text = payload["platforms"]["vk"]["content"]
+    image_prompt = payload["image_prompt"]
+
+    # target_platforms: vk всегда; telegram если есть секция
+    targets = ["vk"]
+    if "telegram" in payload["platforms"] and payload["platforms"]["telegram"].get("content"):
+        targets.append("telegram")
+
+    s = SessionLocal()
+    try:
+        rubric = s.get(Rubric, rubric_key)
+        if not rubric:
+            print(f"Рубрика {rubric_key!r} не найдена в БД. Используй manage.py status или show-rubric.", file=sys.stderr)
+            return 1
+
+        post = Post(
+            rubric_key=rubric_key,
+            topic=topic or None,
+            text_content=vk_text,
+            status="draft",
+            image_prompt=image_prompt,
+            image_source="external_ai",
+            target_platforms=_json.dumps(targets),
+        )
+        s.add(post)
+        s.commit()
+        s.refresh(post)
+        post_id = post.id
+        print(f"Создан пост id={post_id} (rubric={rubric_key}, status=draft, targets={targets}).")
+        print(f"VK preview: {_truncate(vk_text, 200)}")
+        if "telegram" in targets:
+            tg_text = payload["platforms"]["telegram"]["content"]
+            print(f"TG preview: {_truncate(tg_text, 200)}")
+
+        if args.no_image:
+            print("Картинка не генерируется (флаг --no-image).")
+            return 0
+
+        # Генерация картинки через gpt-image-2 /edits с референсом эмоции
+        from core.generators.image_clients import OpenAIImageProvider, ImageError
+        from core.storage.models import MediaAsset
+
+        ref_path = get_reference_path(emotion=emotion)
+        if ref_path is None:
+            print(f"Внимание: референс эмоции {emotion!r} не найден на диске. Генерация будет без референса.")
+            references = []
+        else:
+            references = [ref_path]
+            print(f"Использую референс эмоции: {emotion} ({ref_path.name})")
+
+        print(f"Запрашиваю gpt-image-2 (это может занять 1-3 минуты)...")
+        provider = OpenAIImageProvider()
+        try:
+            if references:
+                result = provider.generate_with_reference(
+                    prompt=image_prompt,
+                    reference_paths=references,
+                    size="1024x1024",
+                    quality=args.quality,
+                )
+            else:
+                result = provider.generate(
+                    prompt=image_prompt,
+                    size="1024x1024",
+                    quality=args.quality,
+                )
+        except ImageError as e:
+            print(f"Ошибка генерации картинки: {e}", file=sys.stderr)
+            print(f"Пост создан без картинки (id={post_id}). Можно повторить генерацию позже через UI.", file=sys.stderr)
+            return 0  # пост уже создан, не считаем фатальной ошибкой
+
+        # Привязка к посту + запись в media_assets
+        post.image_path = result["file_path"]
+        media = MediaAsset(
+            kind="image",
+            file_path=result["file_path"],
+            original_name=Path(result["file_path"]).name,
+            mime_type=result["mime_type"],
+            size_bytes=result["size_bytes"],
+            width=result.get("width"),
+            height=result.get("height"),
+            source="external_ai",
+            prompt_used=image_prompt,
+        )
+        s.add(media)
+        s.commit()
+        print(f"Картинка готова: static/uploads/{result['file_path']}  ({result['size_bytes']/1024:.0f} КБ)")
+    finally:
+        s.close()
+
+    print(f"\nГотово. Открой пост в UI: http://127.0.0.1:5000  или CLI: manage.py show-post {post_id}")
+    return 0
+
+
 def cmd_schedule(args) -> int:
     """Планирует публикацию поста на ISO-8601 время (UTC если без TZ)."""
     from core.scheduler import schedule_post as _sched, init_scheduler
@@ -320,6 +487,17 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("id", type=int)
     sc.add_argument("when", help="ISO-8601, например 2026-05-27T10:00:00")
 
+    sr = sub.add_parser("show-rubric", help="Показать system_prompt и image_template рубрики (для Skill)")
+    sr.add_argument("key", help="Ключ рубрики: word_of_day, common_mistake, и т. д.")
+
+    ij = sub.add_parser("import-from-json",
+                        help="Импортировать JSON-черновик от Skill lora-post-builder в БД")
+    ij.add_argument("file", help="Путь к JSON-файлу (data/inbox/text/...)")
+    ij.add_argument("--no-image", action="store_true",
+                    help="Не генерировать картинку через gpt-image-2 (только текст)")
+    ij.add_argument("--quality", default="high", choices=["low", "medium", "high", "auto"],
+                    help="Качество gpt-image-2 (default: high). low = быстро для теста, high = production")
+
     return p
 
 
@@ -333,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
         "generate-post": cmd_generate_post,
         "publish": cmd_publish,
         "schedule": cmd_schedule,
+        "show-rubric": cmd_show_rubric,
+        "import-from-json": cmd_import_from_json,
     }
     return handlers[args.cmd](args)
 

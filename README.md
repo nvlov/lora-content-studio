@@ -221,9 +221,43 @@ venv\Scripts\python manage.py publish 42                  # default: vk
 venv\Scripts\python manage.py publish 42 --platform telegram
 venv\Scripts\python manage.py publish 42 --platform all   # все настроенные
 venv\Scripts\python manage.py schedule 42 2026-05-27T10:00:00
+venv\Scripts\python manage.py show-rubric word_of_day     # для использования из Skill
+venv\Scripts\python manage.py import-from-json <file>     # импорт из Skill lora-post-builder
+venv\Scripts\python manage.py import-from-json <file> --no-image       # только текст
+venv\Scripts\python manage.py import-from-json <file> --quality low    # быстрая картинка для теста
 ```
 
 Все команды работают параллельно с Flask UI — общая БД, общие модули, разные интерфейсы.
+
+## Skill `lora-post-builder` (Claude Code)
+
+Hybrid-workflow для обхода задержки ProxyAPI с новыми моделями Claude. Skill живёт в `~/.claude/skills/lora-post-builder/SKILL.md` (личный, доступен в любом проекте) и применяется когда пишешь Claude'у в чате:
+
+- «Сделай пост Лоры про X»
+- «Преврати эту статью в пост, рубрика mini_fact» (с URL — Claude дёрнет WebFetch)
+- «Оформи идею в формат поста»
+
+**Что делает Skill:**
+
+1. Принимает идею / текст / URL
+2. Определяет рубрику (или спрашивает)
+3. Подбирает эмоцию Лоры из маппинга
+4. Читает актуальный `system_prompt` рубрики из `core/generators/prompts.py` через `manage.py show-rubric`
+5. Генерирует VK-текст (опционально Telegram, опционально kling_prompt)
+6. Собирает JSON по схеме `docs/schemas/lora-post-v1.json`
+7. Сохраняет в `data/inbox/text/YYYY-MM-DD-<rubric>-<slug>.json`
+
+**Дальше — твоя команда:**
+
+```cmd
+venv\Scripts\python manage.py import-from-json data\inbox\text\<file>.json
+```
+
+CLI парсит JSON, создаёт `Post` в БД (status=draft), генерирует картинку через `gpt-image-2 /v1/images/edits` с референсом эмоции Лоры (1–3 минуты на high quality), сохраняет в `static/uploads/images/`, привязывает к посту через `MediaAsset`.
+
+После этого — ревью в Flask UI или CLI, публикация по обычному флоу (`publish-now`, `schedule`).
+
+**Бренд-голос** — в `references/lora-voice-guide.md`. Skill ссылается на него; обновляй документ когда тон голоса или эмоции меняются.
 
 ## Что в этой версии (v0.2)
 
